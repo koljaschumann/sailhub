@@ -1,0 +1,51 @@
+@import '@tsc/ui/styles';
+
+/* Custom styles for Schadensmeldung app */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slideUp {
+  animation: slideUp 0.3s ease-out;
+}
+
+/* Dropzone styles */
+.dropzone-active {
+  @apply border-2 border-dashed border-gold-400 bg-gold-400/10;
+}
+
+body.light .dropzone-active {
+  @apply border-teal-500 bg-teal-500/10;
+}
+
+/* Status badges */
+.status-offen {
+  @apply bg-coral/20 text-coral border-coral/30;
+}
+
+.status-in_bearbeitung {
+  @apply bg-gold-400/20 text-gold-400 border-gold-400/30;
+}
+
+.status-erledigt {
+  @apply bg-success/20 text-success border-success/30;
+}
+
+body.light .status-offen {
+  @apply bg-red-100 text-red-600 border-red-200;
+}
+
+body.light .status-in_bearbeitung {
+  @apply bg-amber-100 text-amber-600 border-amber-200;
+}
+
+body.light .status-erledigt {
+  @apply bg-green-100 text-green-600 border-green-200;
+}

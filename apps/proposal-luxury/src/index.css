@@ -1,0 +1,177 @@
+@import url('https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+@import '@tsc/ui/styles';
+
+:root {
+  background-image: url('./assets/bg.png');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  --color-primary: #002046;
+}
+
+body {
+  font-family: 'Lato', sans-serif;
+  color: #002046;
+  background-color: rgba(245, 245, 240, 0.9);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: 'Playfair Display', serif;
+  color: #002046;
+}
+
+/* Custom animations for startgelder app */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slideUp {
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* Drag and drop styles */
+.drag-active {
+  @apply border-2 border-dashed border-luxury-gold bg-luxury-gold/10;
+}
+
+.drag-over {
+  @apply scale-105 border-luxury-gold;
+}
+
+/* ============================================
+   SHIMMER EFFECTS
+   ============================================ */
+
+/* Shimmer-Effekt - Licht gleitet über Element */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(240, 230, 140, 0.08) 25%,
+      rgba(240, 230, 140, 0.15) 50%,
+      rgba(240, 230, 140, 0.08) 75%,
+      transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 8s ease-in-out infinite;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+body.light .shimmer::after {
+  background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(0, 32, 70, 0.08) 25%,
+      rgba(0, 32, 70, 0.12) 50%,
+      rgba(0, 32, 70, 0.08) 75%,
+      transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 8s ease-in-out infinite;
+}
+
+/* Text-Shimmer - Schimmernder Text */
+@keyframes text-shimmer {
+  0% {
+    background-position: -200% center;
+  }
+
+  100% {
+    background-position: 200% center;
+  }
+}
+
+body.dark .text-shimmer {
+  background: linear-gradient(90deg,
+      #F0E68C 0%,
+      #FFFACD 25%,
+      #F0E68C 50%,
+      #DAA520 75%,
+      #F0E68C 100%);
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: text-shimmer 4s linear infinite;
+}
+
+body.light .text-shimmer {
+  background: linear-gradient(90deg,
+      #002046 0%,
+      #1E3A8A 25%,
+      #002046 50%,
+      #1E3A8A 75%,
+      #002046 100%);
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: text-shimmer 4s linear infinite;
+}
+
+/* Gradient flow animation */
+@keyframes gradient-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.gradient-flow {
+  background-size: 200% 200%;
+  animation: gradient-flow 8s ease infinite;
+}

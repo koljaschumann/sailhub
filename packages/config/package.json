@@ -1,0 +1,13 @@
+{
+  "name": "@tsc/config",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "tailwind.config.js",
+  "exports": {
+    "./tailwind": "./tailwind.config.js",
+    "./postcss": "./postcss.config.js",
+    "./email": "./email.js",
+    "./modules": "./modules.js"
+  }
+}

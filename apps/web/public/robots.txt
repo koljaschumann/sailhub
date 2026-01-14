@@ -1,0 +1,3 @@
+# Suchmaschinen sollen diese Seite nicht indexieren
+User-agent: *
+Disallow: /
