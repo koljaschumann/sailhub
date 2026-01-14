@@ -1,0 +1,33 @@
+{
+  "name": "web",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext js,jsx"
+  },
+  "dependencies": {
+    "@tsc/config": "workspace:*",
+    "@tsc/data": "workspace:*",
+    "@tsc/supabase": "workspace:*",
+    "@tsc/ui": "workspace:*",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.1",
+    "pdfjs-dist": "^3.11.174",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-dropzone": "^14.2.3",
+    "react-router-dom": "^6.21.0",
+    "tesseract.js": "^5.0.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.3.6",
+    "vite": "^5.0.10"
+  }
+}

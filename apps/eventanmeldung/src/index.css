@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Maritime Dark Theme Colors */
+:root {
+  --navy-900: #0a1628;
+  --navy-800: #111d36;
+  --navy-700: #1a2744;
+  --gold-400: #fbbf24;
+  --cream: #fdf6e3;
+  --coral: #f87171;
+  --success: #4ade80;
+  --teal-500: #14b8a6;
+  --teal-600: #0d9488;
+}
+
+/* Glass Card Shimmer Effect */
+@keyframes shimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+.glass-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(251, 191, 36, 0.03) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 8s ease-in-out infinite;
+}
+
+/* Status Colors */
+.status-angemeldet {
+  @apply bg-blue-500/20 text-blue-400 border-blue-500/30;
+}
+
+.status-bestaetigt {
+  @apply bg-emerald-500/20 text-emerald-400 border-emerald-500/30;
+}
+
+.status-abgesagt {
+  @apply bg-red-500/20 text-red-400 border-red-500/30;
+}
+
+.status-teilgenommen {
+  @apply bg-gold-400/20 text-gold-400 border-gold-400/30;
+}
+
+/* Form Styles */
+.form-input {
+  @apply w-full px-4 py-3 rounded-xl border transition-colors;
+}
+
+.form-input-dark {
+  @apply bg-navy-800 border-navy-700 text-cream placeholder:text-cream/30;
+}
+
+.form-input-light {
+  @apply bg-white border-light-border text-light-text;
+}
+
+/* Floating Animation */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.float {
+  animation: float 3s ease-in-out infinite;
+}

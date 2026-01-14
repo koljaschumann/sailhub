@@ -1,0 +1,12 @@
+{
+  "name": "@tsc/data",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./boatClasses": "./src/boatClasses.js",
+    "./motorboats": "./src/motorboats.js",
+    "./roles": "./src/roles.js"
+  }
+}

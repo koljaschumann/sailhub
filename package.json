@@ -1,0 +1,24 @@
+{
+  "name": "tsc-jugend-plattform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TSC Jugend Plattform - Unified Platform for Tegeler Segel-Club",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "dev:web": "turbo run dev --filter=web",
+    "dev:saisonplanung": "turbo run dev --filter=saisonplanung",
+    "dev:startgelder": "turbo run dev --filter=startgelder",
+    "build:web": "turbo run build --filter=web",
+    "clean": "turbo run clean && rimraf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "rimraf": "^5.0.5"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=18"
+  }
+}

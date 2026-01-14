@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh:*)",
+      "Bash(ssh-add:*)",
+      "Bash(curl:*)",
+      "Bash(grep:*)",
+      "Bash(xcopy:*)",
+      "Bash(pnpm build:*)"
+    ]
+  }
+}

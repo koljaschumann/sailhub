@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TSC Jugendportal - Testdaten Generator</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a;
+            color: #f1f5f9;
+            padding: 40px;
+            line-height: 1.6;
+        }
+        h1 { color: #fbbf24; margin-bottom: 30px; }
+        h2 { color: #22d3ee; margin-top: 30px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #334155;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        button:hover { background: #2563eb; }
+        button.danger { background: #ef4444; }
+        button.danger:hover { background: #dc2626; }
+        button.success { background: #22c55e; }
+        button.success:hover { background: #16a34a; }
+        .log {
+            background: #0f172a;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        .log-entry { margin: 5px 0; }
+        .log-entry.success { color: #22c55e; }
+        .log-entry.info { color: #3b82f6; }
+        .log-entry.warn { color: #f59e0b; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }
+        .stat { background: #334155; padding: 15px; border-radius: 8px; text-align: center; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #fbbf24; }
+        .stat-label { font-size: 12px; color: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>TSC Jugendportal - Testdaten Generator</h1>
+
+        <div class="card">
+            <h2>Aktionen</h2>
+            <button class="success" onclick="generateAllTestData()">Alle Testdaten generieren</button>
+            <button onclick="showCurrentData()">Aktuelle Daten anzeigen</button>
+            <button class="danger" onclick="clearAllData()">Alle Daten loeschen</button>
+        </div>
+
+        <div class="card">
+            <h2>Module einzeln</h2>
+            <button onclick="generateEventRegistrations()">Event-Anmeldungen (20)</button>
+            <button onclick="generateDonations()">Spenden (30)</button>
+            <button onclick="generateDamageReports()">Schadensmeldungen (15)</button>
+            <button onclick="generateCharterBookings()">Charter-Buchungen (10)</button>
+            <button onclick="generateFundingApplications()">Foerderantraege (12)</button>
+            <button onclick="generateStartgelderData()">Startgelder-Daten (25)</button>
+        </div>
+
+        <div class="card">
+            <h2>Statistiken</h2>
+            <div class="stats" id="stats"></div>
+        </div>
+
+        <div class="card">
+            <h2>Log</h2>
+            <div class="log" id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        const FIRST_NAMES = ['Max', 'Lena', 'Paul', 'Emma', 'Felix', 'Anna', 'Leon', 'Mia', 'Jonas', 'Sophie', 'Lukas', 'Hannah', 'Tim', 'Laura', 'Ben', 'Leonie', 'Niklas', 'Amelie', 'David', 'Lisa'];
+        const LAST_NAMES = ['Mueller', 'Schmidt', 'Schneider', 'Fischer', 'Weber', 'Meyer', 'Wagner', 'Becker', 'Schulz', 'Hoffmann', 'Schaefer', 'Koch', 'Bauer', 'Richter', 'Klein', 'Wolf', 'Schroeder', 'Neumann', 'Schwarz', 'Zimmermann'];
+        const BOAT_CLASSES = ['optimist', 'opti-b', 'opti-a', 'ilca4', 'ilca6', '420er', '29er'];
+        const EVENTS = ['Fruehjahrsregatta Tegeler See', 'Berliner Landesmeisterschaft', 'Pfingst-Trainingslager Ostsee', 'Deutsche Jugendmeisterschaft', 'Sommerregatta Mueggelsee', 'Herbstregatta Wannsee', 'Opti-Cup Berlin', 'ILCA Training Camp'];
+        const BOATS = ['Opti 1', 'Opti 2', 'Opti 3', 'Opti 4', 'Opti 5', 'ILCA 1', 'ILCA 2', '420er Rot', '420er Blau', 'Jugend-29er'];
+        const EQUIPMENT = ['Grosssegel', 'Fock', 'Ruder', 'Schwert', 'Mast', 'Baum', 'Pinne', 'Beschlaege', 'Rumpf'];
+        const DAMAGE_TYPES = ['Riss', 'Bruch', 'Loch', 'Abnutzung', 'Verbiegung', 'Delamination'];
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.insertBefore(entry, logDiv.firstChild);
+        }
+
+        function randomItem(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+        function randomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+        function randomDate(start, end) {
+            return new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime())).toISOString();
+        }
+        function randomEmail(first, last) {
+            return `${first.toLowerCase()}.${last.toLowerCase()}@${randomItem(['gmail.com', 'web.de', 'gmx.de', 'outlook.com'])}`;
+        }
+        function randomBirthDate(minAge, maxAge) {
+            const now = new Date();
+            const minYear = now.getFullYear() - maxAge;
+            const maxYear = now.getFullYear() - minAge;
+            return `${randomInt(minYear, maxYear)}-${String(randomInt(1, 12)).padStart(2, '0')}-${String(randomInt(1, 28)).padStart(2, '0')}`;
+        }
+
+        function generateEventRegistrations() {
+            const registrations = [];
+            for (let i = 0; i < 20; i++) {
+                const firstName = randomItem(FIRST_NAMES);
+                const lastName = randomItem(LAST_NAMES);
+                registrations.push({
+                    id: `reg_test_${Date.now()}_${i}`,
+                    event_name: randomItem(EVENTS),
+                    sailor_first_name: firstName,
+                    sailor_last_name: lastName,
+                    sailor_birth_date: randomBirthDate(8, 18),
+                    boat_class_id: randomItem(BOAT_CLASSES),
+                    sail_number: `GER ${randomInt(1000, 9999)}`,
+                    contact_email: randomEmail(firstName, lastName),
+                    contact_phone: `+49 ${randomInt(150, 179)} ${randomInt(1000000, 9999999)}`,
+                    crew_members: [],
+                    disclaimer_accepted: true,
+                    status: randomItem(['angemeldet', 'bestaetigt', 'teilgenommen']),
+                    created_at: randomDate(new Date('2025-01-01'), new Date())
+                });
+            }
+            localStorage.setItem('tsc_event_registrations', JSON.stringify(registrations));
+            log(`${registrations.length} Event-Anmeldungen erstellt`, 'success');
+            updateStats();
+        }
+
+        function generateDonations() {
+            const donations = [];
+            const campaigns = ['campaign_1', 'campaign_2', 'campaign_3'];
+            for (let i = 0; i < 30; i++) {
+                const anonymous = Math.random() > 0.7;
+                const firstName = randomItem(FIRST_NAMES);
+                const lastName = randomItem(LAST_NAMES);
+                donations.push({
+                    id: `donation_test_${Date.now()}_${i}`,
+                    campaign_id: randomItem(campaigns),
+                    amount: randomItem([25, 50, 100, 150, 250, 500]),
+                    donor_name: anonymous ? null : `${firstName} ${lastName}`,
+                    donor_email: anonymous ? null : randomEmail(firstName, lastName),
+                    message: Math.random() > 0.5 ? randomItem(['Viel Erfolg!', 'Weiter so!', 'Fuer die Jugend!', 'Ahoi!', 'Mast- und Schotbruch!']) : null,
+                    anonymous: anonymous,
+                    payment_method: 'stripe',
+                    stripe_payment_id: `pi_test_${Date.now()}_${i}`,
+                    status: 'completed',
+                    created_at: randomDate(new Date('2025-01-01'), new Date())
+                });
+            }
+            localStorage.setItem('tsc_donations', JSON.stringify(donations));
+            log(`${donations.length} Spenden erstellt (Summe: ${donations.reduce((s, d) => s + d.amount, 0)} EUR)`, 'success');
+            updateStats();
+        }
+
+        function generateDamageReports() {
+            const reports = [];
+            for (let i = 0; i < 15; i++) {
+                const firstName = randomItem(FIRST_NAMES);
+                const lastName = randomItem(LAST_NAMES);
+                reports.push({
+                    id: `dmg_test_${Date.now()}_${i}`,
+                    equipment_type: randomItem(['boat', 'motorboat', 'trailer']),
+                    equipment_name: randomItem(BOATS),
+                    damage_type: randomItem(DAMAGE_TYPES),
+                    affected_part: randomItem(EQUIPMENT),
+                    description: `${randomItem(DAMAGE_TYPES)} am ${randomItem(EQUIPMENT)} festgestellt. ${randomItem(['Muss repariert werden.', 'Dringend!', 'Bei naechster Gelegenheit reparieren.', 'Sicherheitsrelevant!'])}`,
+                    severity: randomItem(['minor', 'moderate', 'severe']),
+                    discovered_date: randomDate(new Date('2025-01-01'), new Date()).split('T')[0],
+                    discovered_during: randomItem(['training', 'regatta', 'inspection', 'other']),
+                    reporter_name: `${firstName} ${lastName}`,
+                    reporter_email: randomEmail(firstName, lastName),
+                    reporter_phone: `+49 ${randomInt(150, 179)} ${randomInt(1000000, 9999999)}`,
+                    photos: [],
+                    status: randomItem(['reported', 'in_review', 'repair_planned', 'in_repair', 'completed']),
+                    created_at: randomDate(new Date('2025-01-01'), new Date())
+                });
+            }
+            localStorage.setItem('tsc_damage_reports', JSON.stringify(reports));
+            log(`${reports.length} Schadensmeldungen erstellt`, 'success');
+            updateStats();
+        }
+
+        function generateCharterBookings() {
+            const bookings = [];
+            for (let i = 0; i < 10; i++) {
+                const firstName = randomItem(FIRST_NAMES);
+                const lastName = randomItem(LAST_NAMES);
+                bookings.push({
+                    id: `charter_test_${Date.now()}_${i}`,
+                    boat_id: `boat_${randomInt(1, 5)}`,
+                    boat_name: randomItem(BOATS),
+                    sailor_first_name: firstName,
+                    sailor_last_name: lastName,
+                    sailor_birth_date: randomBirthDate(10, 18),
+                    parent_name: `${randomItem(FIRST_NAMES)} ${lastName}`,
+                    parent_email: randomEmail('eltern', lastName),
+                    parent_phone: `+49 ${randomInt(150, 179)} ${randomInt(1000000, 9999999)}`,
+                    season: 2025,
+                    charter_fee: 250,
+                    payment_status: randomItem(['pending', 'paid']),
+                    contract_signed: Math.random() > 0.3,
+                    status: randomItem(['requested', 'approved', 'active', 'completed']),
+                    created_at: randomDate(new Date('2025-01-01'), new Date())
+                });
+            }
+            localStorage.setItem('tsc_charter_bookings', JSON.stringify(bookings));
+            log(`${bookings.length} Charter-Buchungen erstellt`, 'success');
+            updateStats();
+        }
+
+        function generateFundingApplications() {
+            const applications = [];
+            const purposes = ['Neues Segel', 'Regatta-Gebuehren', 'Trainingsausruestung', 'Bootsreparatur', 'Trainingslager-Kosten', 'Wetterkleidung', 'Neoprenanzug'];
+            for (let i = 0; i < 12; i++) {
+                const firstName = randomItem(FIRST_NAMES);
+                const lastName = randomItem(LAST_NAMES);
+                applications.push({
+                    id: `funding_test_${Date.now()}_${i}`,
+                    applicant_first_name: firstName,
+                    applicant_last_name: lastName,
+                    applicant_birth_date: randomBirthDate(10, 18),
+                    parent_name: `${randomItem(FIRST_NAMES)} ${lastName}`,
+                    parent_email: randomEmail('eltern', lastName),
+                    parent_phone: `+49 ${randomInt(150, 179)} ${randomInt(1000000, 9999999)}`,
+                    purpose: randomItem(purposes),
+                    description: `Antrag auf Foerderung fuer ${randomItem(purposes)}. ${randomItem(['Wichtig fuer die Saison.', 'Fuer bessere Trainingsmoeglichkeiten.', 'Notwendig fuer Wettkampfteilnahme.'])}`,
+                    amount_requested: randomItem([100, 150, 200, 250, 300, 400, 500]),
+                    boat_class: randomItem(BOAT_CLASSES),
+                    receipts: [],
+                    status: randomItem(['submitted', 'in_review', 'approved', 'rejected', 'paid']),
+                    amount_approved: null,
+                    created_at: randomDate(new Date('2025-01-01'), new Date())
+                });
+            }
+            localStorage.setItem('tsc_funding_applications', JSON.stringify(applications));
+            log(`${applications.length} Foerderantraege erstellt`, 'success');
+            updateStats();
+        }
+
+        function generateStartgelderData() {
+            // Regatten
+            const regatten = [];
+            const locations = ['Berlin', 'Kiel', 'Warnemuende', 'Muggelsee', 'Wannsee', 'Steinhuder Meer', 'Bodensee'];
+            for (let i = 0; i < 25; i++) {
+                const firstName = randomItem(FIRST_NAMES);
+                const lastName = randomItem(LAST_NAMES);
+                regatten.push({
+                    id: `regatta_test_${Date.now()}_${i}`,
+                    eventName: randomItem(EVENTS),
+                    location: randomItem(locations),
+                    startDate: randomDate(new Date('2025-01-01'), new Date('2025-12-31')).split('T')[0],
+                    endDate: randomDate(new Date('2025-01-01'), new Date('2025-12-31')).split('T')[0],
+                    boatClass: randomItem(BOAT_CLASSES),
+                    sailorName: `${firstName} ${lastName}`,
+                    sailNumber: `GER ${randomInt(1000, 9999)}`,
+                    startgeld: randomItem([15, 25, 35, 45, 55, 75]),
+                    meldegeld: randomItem([0, 5, 10, 15]),
+                    ranking: Math.random() > 0.7 ? randomInt(1, 50) : null,
+                    status: randomItem(['geplant', 'gemeldet', 'gesegelt', 'abgerechnet']),
+                    receipts: [],
+                    source: randomItem(['manual', 'manage2sail']),
+                    createdAt: randomDate(new Date('2025-01-01'), new Date())
+                });
+            }
+            localStorage.setItem('tsc-all-regatten', JSON.stringify(regatten));
+
+            // Crew Database
+            const crew = [];
+            for (let i = 0; i < 15; i++) {
+                const firstName = randomItem(FIRST_NAMES);
+                const lastName = randomItem(LAST_NAMES);
+                crew.push({
+                    id: `crew_${i}`,
+                    firstName: firstName,
+                    lastName: lastName,
+                    birthDate: randomBirthDate(8, 18),
+                    email: randomEmail(firstName, lastName),
+                    boatClasses: [randomItem(BOAT_CLASSES)],
+                    sailNumber: `GER ${randomInt(1000, 9999)}`
+                });
+            }
+            localStorage.setItem('tsc-crew-database', JSON.stringify(crew));
+
+            log(`${regatten.length} Regatten und ${crew.length} Crew-Mitglieder erstellt`, 'success');
+            updateStats();
+        }
+
+        function generateAllTestData() {
+            log('Generiere alle Testdaten...', 'info');
+            generateEventRegistrations();
+            generateDonations();
+            generateDamageReports();
+            generateCharterBookings();
+            generateFundingApplications();
+            generateStartgelderData();
+            log('Alle Testdaten erfolgreich generiert!', 'success');
+        }
+
+        function clearAllData() {
+            if (!confirm('Wirklich alle Testdaten loeschen?')) return;
+
+            const keys = [
+                'tsc_event_registrations',
+                'tsc_donations',
+                'tsc_damage_reports',
+                'tsc_charter_bookings',
+                'tsc_funding_applications',
+                'tsc-all-regatten',
+                'tsc-crew-database',
+                'tsc-seasons',
+                'tsc-boat-data',
+                'tsc-pdf-attachments'
+            ];
+            keys.forEach(key => localStorage.removeItem(key));
+            log('Alle Daten geloescht', 'warn');
+            updateStats();
+        }
+
+        function showCurrentData() {
+            const keys = [
+                'tsc_event_registrations',
+                'tsc_donations',
+                'tsc_damage_reports',
+                'tsc_charter_bookings',
+                'tsc_funding_applications',
+                'tsc-all-regatten',
+                'tsc-crew-database'
+            ];
+            keys.forEach(key => {
+                const data = localStorage.getItem(key);
+                const count = data ? JSON.parse(data).length : 0;
+                log(`${key}: ${count} Eintraege`, 'info');
+            });
+        }
+
+        function updateStats() {
+            const stats = document.getElementById('stats');
+            const data = {
+                'Event-Anmeldungen': JSON.parse(localStorage.getItem('tsc_event_registrations') || '[]').length,
+                'Spenden': JSON.parse(localStorage.getItem('tsc_donations') || '[]').length,
+                'Schadensmeldungen': JSON.parse(localStorage.getItem('tsc_damage_reports') || '[]').length,
+                'Charter-Buchungen': JSON.parse(localStorage.getItem('tsc_charter_bookings') || '[]').length,
+                'Foerderantraege': JSON.parse(localStorage.getItem('tsc_funding_applications') || '[]').length,
+                'Regatten': JSON.parse(localStorage.getItem('tsc-all-regatten') || '[]').length
+            };
+
+            stats.innerHTML = Object.entries(data).map(([label, value]) => `
+                <div class="stat">
+                    <div class="stat-value">${value}</div>
+                    <div class="stat-label">${label}</div>
+                </div>
+            `).join('');
+        }
+
+        // Init
+        updateStats();
+        log('Testdaten-Generator bereit', 'success');
+    </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "@tsc/ui",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./styles": "./src/styles/base.css"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "@tsc/supabase": "workspace:*"
+  }
+}

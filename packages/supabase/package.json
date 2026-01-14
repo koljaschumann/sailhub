@@ -1,0 +1,18 @@
+{
+  "name": "@tsc/supabase",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.jsx",
+  "exports": {
+    ".": "./src/index.jsx",
+    "./client": "./src/client.js",
+    "./auth": "./src/useAuth.jsx",
+    "./manage2sail": "./src/manage2sail.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0"
+  }
+}
