@@ -7,6 +7,7 @@ import AuthCallback from './pages/AuthCallback';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import SuperAdmin from './pages/SuperAdmin';
+import Profile from './pages/Profile';
 import Nutzungsbedingungen from './pages/Nutzungsbedingungen';
 import Datenschutz from './pages/Datenschutz';
 import PoweredByAitema from './components/PoweredByAitema';
@@ -154,6 +155,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profil"
+        element={
+          <ProtectedRoute>
+            <Profile />
           </ProtectedRoute>
         }
       />

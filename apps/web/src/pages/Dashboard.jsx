@@ -142,6 +142,18 @@ export default function Dashboard() {
             </button>
             <button
               type="button"
+              onClick={() => navigate('/profil')}
+              className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                isDark
+                  ? 'text-cream/60 hover:text-cream hover:bg-navy-800'
+                  : 'text-light-muted hover:text-light-text hover:bg-light-border'
+              }`}
+            >
+              <span className="w-4 h-4">{Icons.user}</span>
+              Profil
+            </button>
+            <button
+              type="button"
               onClick={handleSignOut}
               className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors ${
                 isDark
