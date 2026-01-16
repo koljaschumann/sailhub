@@ -46,6 +46,9 @@ export function AddRegattaPage({ setCurrentPage }) {
   const [raceCount, setRaceCount] = useState('');
   const [sailorFound, setSailorFound] = useState(null);
 
+  // Eingabe-Modus: 'search' = manage2sail Suche, 'manual' = PDF Upload / Manuell
+  const [inputMode, setInputMode] = useState(null); // null = Auswahl, 'search', 'manual'
+
   // Rechnung
   const [invoiceAmount, setInvoiceAmount] = useState('');
   const [currentInvoiceData, setCurrentInvoiceData] = useState(null);
@@ -53,6 +56,12 @@ export function AddRegattaPage({ setCurrentPage }) {
   const [ocrProgress, setOcrProgress] = useState(null);
   const [isDraggingInvoice, setIsDraggingInvoice] = useState(false);
   const invoiceInputRef = useRef(null);
+
+  // Ergebnis-PDF (für manuellen Modus)
+  const [resultPdfData, setResultPdfData] = useState(null);
+  const [resultPdfProcessing, setResultPdfProcessing] = useState(false);
+  const [isDraggingResult, setIsDraggingResult] = useState(false);
+  const resultInputRef = useRef(null);
 
   // Crew
   const [selectedCrew, setSelectedCrew] = useState([]);
@@ -202,6 +211,52 @@ export function AddRegattaPage({ setCurrentPage }) {
     await processInvoice(file);
   };
 
+  // Ergebnis-PDF verarbeiten (manueller Modus)
+  const handleResultPdfDrop = async (e) => {
+    e.preventDefault();
+    setIsDraggingResult(false);
+
+    const file = e.dataTransfer?.files[0] || e.target?.files[0];
+    if (!file) return;
+
+    if (!file.type.includes('pdf') && !file.type.includes('image')) {
+      addToast('Bitte eine PDF- oder Bild-Datei auswählen', 'error');
+      return;
+    }
+
+    setResultPdfProcessing(true);
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = e.target.result.split(',')[1];
+        setResultPdfData(base64);
+
+        // Versuche Daten aus PDF zu extrahieren
+        try {
+          const pdfData = await parseRegattaPDF(base64, boatData.segelnummer);
+          if (pdfData) {
+            if (pdfData.regattaName) setRegattaName(pdfData.regattaName);
+            if (pdfData.date) setDate(pdfData.date);
+            if (pdfData.placement) setPlacement(pdfData.placement.toString());
+            if (pdfData.totalParticipants) setTotalParticipants(pdfData.totalParticipants.toString());
+            addToast('Daten aus PDF extrahiert!', 'success');
+          }
+        } catch (err) {
+          console.log('PDF parsing optional:', err);
+        }
+
+        setResultPdfProcessing(false);
+        addToast('Ergebnis-PDF hochgeladen', 'success');
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error('Result PDF Error:', err);
+      addToast('Fehler beim Verarbeiten', 'error');
+      setResultPdfProcessing(false);
+    }
+  };
+
   // Speichern
   const handleSave = () => {
     if (!regattaName) {
@@ -294,30 +349,98 @@ export function AddRegattaPage({ setCurrentPage }) {
         ))}
       </div>
 
-      {/* Step 0: Regatta suchen */}
+      {/* Step 0: Modus-Auswahl oder Regatta-Eingabe */}
       {step === 0 && (
         <GlassCard>
-          {/* Jahr-Auswahl */}
-          <div className="mb-4">
-            <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
-              Jahr
-            </label>
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-              className={`w-32 px-3 py-2 rounded-lg border ${
-                isDark
-                  ? 'bg-navy-800 border-navy-700 text-cream'
-                  : 'bg-white border-light-border text-light-text'
-              }`}
-            >
-              {years.map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
+          {/* Modus-Auswahl wenn noch nicht gewählt */}
+          {inputMode === null && (
+            <div className="space-y-4">
+              <p className={`text-sm ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+                Wie möchtest du die Regatta-Daten eingeben?
+              </p>
 
-          {/* Suchfeld */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* manage2sail Suche */}
+                <button
+                  onClick={() => setInputMode('search')}
+                  className={`p-6 rounded-xl border-2 text-left transition-all hover:scale-[1.02] ${
+                    isDark
+                      ? 'border-navy-700 hover:border-gold-400 bg-navy-800/50'
+                      : 'border-light-border hover:border-teal-500 bg-white'
+                  }`}
+                >
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-3 ${
+                    isDark ? 'bg-gold-400/10 text-gold-400' : 'bg-teal-500/10 text-teal-500'
+                  }`}>
+                    {Icons.search}
+                  </div>
+                  <h3 className={`font-semibold mb-1 ${isDark ? 'text-cream' : 'text-light-text'}`}>
+                    manage2sail Suche
+                  </h3>
+                  <p className={`text-sm ${isDark ? 'text-cream/60' : 'text-light-muted'}`}>
+                    Suche deine Regatta online und wir füllen die Daten automatisch aus
+                  </p>
+                </button>
+
+                {/* Manuell / PDF Upload */}
+                <button
+                  onClick={() => setInputMode('manual')}
+                  className={`p-6 rounded-xl border-2 text-left transition-all hover:scale-[1.02] ${
+                    isDark
+                      ? 'border-navy-700 hover:border-gold-400 bg-navy-800/50'
+                      : 'border-light-border hover:border-teal-500 bg-white'
+                  }`}
+                >
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-3 ${
+                    isDark ? 'bg-mint/10 text-mint' : 'bg-green-500/10 text-green-600'
+                  }`}>
+                    {Icons.receipt}
+                  </div>
+                  <h3 className={`font-semibold mb-1 ${isDark ? 'text-cream' : 'text-light-text'}`}>
+                    PDF Upload / Manuell
+                  </h3>
+                  <p className={`text-sm ${isDark ? 'text-cream/60' : 'text-light-muted'}`}>
+                    Lade ein Ergebnis-PDF hoch oder gib die Daten manuell ein
+                  </p>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* manage2sail Suche Modus */}
+          {inputMode === 'search' && (
+            <>
+              {/* Zurück-Button */}
+              <button
+                onClick={() => setInputMode(null)}
+                className={`mb-4 flex items-center gap-2 text-sm ${
+                  isDark ? 'text-cream/60 hover:text-cream' : 'text-light-muted hover:text-light-text'
+                }`}
+              >
+                {Icons.arrowLeft} Andere Eingabemethode wählen
+              </button>
+
+              {/* Jahr-Auswahl */}
+              <div className="mb-4">
+                <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+                  Jahr
+                </label>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                  className={`w-32 px-3 py-2 rounded-lg border ${
+                    isDark
+                      ? 'bg-navy-800 border-navy-700 text-cream'
+                      : 'bg-white border-light-border text-light-text'
+                  }`}
+                >
+                  {years.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Suchfeld */}
           <div className="relative mb-4">
             <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
               Regatta suchen
@@ -528,6 +651,156 @@ export function AddRegattaPage({ setCurrentPage }) {
               Weiter
             </Button>
           </div>
+            </>
+          )}
+
+          {/* Manueller Modus / PDF Upload */}
+          {inputMode === 'manual' && (
+            <>
+              {/* Zurück-Button */}
+              <button
+                onClick={() => setInputMode(null)}
+                className={`mb-4 flex items-center gap-2 text-sm ${
+                  isDark ? 'text-cream/60 hover:text-cream' : 'text-light-muted hover:text-light-text'
+                }`}
+              >
+                {Icons.arrowLeft} Andere Eingabemethode wählen
+              </button>
+
+              {/* Ergebnis-PDF Upload */}
+              <div className="mb-6">
+                <label className={`block text-sm mb-2 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+                  Ergebnis-PDF hochladen (optional)
+                </label>
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDraggingResult(true); }}
+                  onDragLeave={() => setIsDraggingResult(false)}
+                  onDrop={handleResultPdfDrop}
+                  onClick={() => resultInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
+                    isDraggingResult
+                      ? isDark ? 'border-gold-400 bg-gold-400/10' : 'border-teal-500 bg-teal-500/10'
+                      : resultPdfData
+                        ? 'border-success bg-success/10'
+                        : isDark ? 'border-navy-700 hover:border-gold-400/50' : 'border-light-border hover:border-teal-500/50'
+                  }`}
+                >
+                  <input
+                    ref={resultInputRef}
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="hidden"
+                    onChange={handleResultPdfDrop}
+                  />
+                  <div className={`w-10 h-10 mx-auto mb-2 rounded-lg flex items-center justify-center ${
+                    resultPdfData
+                      ? 'bg-success/20 text-success'
+                      : isDark ? 'bg-gold-400/10 text-gold-400' : 'bg-teal-500/10 text-teal-500'
+                  }`}>
+                    {resultPdfProcessing ? Icons.refresh : resultPdfData ? Icons.check : Icons.receipt}
+                  </div>
+                  <p className={`text-sm ${isDark ? 'text-cream' : 'text-light-text'}`}>
+                    {resultPdfProcessing
+                      ? 'Verarbeite PDF...'
+                      : resultPdfData
+                        ? 'Ergebnis-PDF hochgeladen'
+                        : 'Ergebnis-PDF hier ablegen oder klicken'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Manuelle Formular-Felder */}
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+                      Regatta-Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={regattaName}
+                      onChange={(e) => setRegattaName(e.target.value)}
+                      placeholder="z.B. Rahnsdorfer Optipokal"
+                      className={`w-full px-4 py-2 rounded-lg border ${
+                        isDark
+                          ? 'bg-navy-800 border-navy-700 text-cream placeholder:text-cream/30'
+                          : 'bg-white border-light-border text-light-text'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+                      Datum
+                    </label>
+                    <input
+                      type="date"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-lg border ${
+                        isDark
+                          ? 'bg-navy-800 border-navy-700 text-cream'
+                          : 'bg-white border-light-border text-light-text'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+                      Platzierung
+                    </label>
+                    <input
+                      type="number"
+                      value={placement}
+                      onChange={(e) => setPlacement(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-lg border ${
+                        isDark
+                          ? 'bg-navy-800 border-navy-700 text-cream'
+                          : 'bg-white border-light-border text-light-text'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+                      Teilnehmer
+                    </label>
+                    <input
+                      type="number"
+                      value={totalParticipants}
+                      onChange={(e) => setTotalParticipants(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-lg border ${
+                        isDark
+                          ? 'bg-navy-800 border-navy-700 text-cream'
+                          : 'bg-white border-light-border text-light-text'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+                      Wettfahrten
+                    </label>
+                    <input
+                      type="number"
+                      value={raceCount}
+                      onChange={(e) => setRaceCount(e.target.value)}
+                      className={`w-full px-4 py-2 rounded-lg border ${
+                        isDark
+                          ? 'bg-navy-800 border-navy-700 text-cream'
+                          : 'bg-white border-light-border text-light-text'
+                      }`}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end mt-6">
+                <Button onClick={() => setStep(maxCrew > 1 ? 1 : 2)} disabled={!regattaName}>
+                  Weiter
+                </Button>
+              </div>
+            </>
+          )}
         </GlassCard>
       )}
 
