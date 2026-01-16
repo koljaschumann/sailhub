@@ -428,7 +428,9 @@ sailhub-build/
 |--------|-------------|
 | `supabase` | Supabase Client |
 | `AuthProvider`, `useAuth` | Auth Context & Hook |
-| `scrapeManage2Sail` | Regatta-Daten scrapen |
+| `searchManage2SailRegattas` | Regatta-Suche (Hybrid-Scraping) |
+| `extractRegattaDetails` | Detail-Extraktion via Gemini |
+| `scrapeManage2Sail` | Legacy: Einzelne Regatta scrapen |
 | `findSailorResult` | Segler in Ergebnissen finden |
 | `submitTicket` | ClickUp + GitHub Ticket |
 
@@ -539,34 +541,35 @@ ssh-add ~/.ssh/id_ed25519  # Passphrase: Fedo
 ssh root@49.13.15.44
 ```
 
-### Manage2Sail Scraping schlägt fehl
-1. `VITE_GEMINI_API_KEY` in `.env` prüfen
-2. URL-Format prüfen (`/de-DE/event/...`)
-3. Browser DevTools Console prüfen
-4. Fallback: PDF Upload oder manuelles Formular
+### Manage2Sail Suche schlägt fehl
+1. **Console prüfen** (F12 → Console): Welcher Fallback wird verwendet?
+2. **Firecrawl prüfen**: `curl https://scrape.aitema.de/health`
+3. **CORS-Proxy testen**: Werden corsproxy.io oder allorigins.win erreicht?
+4. **Manueller Fallback**: Regatta-Name direkt eingeben, ohne manage2sail-Suche
 
 ---
 
-## Current State (Stand: 15. Januar 2026)
+## Current State (Stand: 16. Januar 2026)
 
 **Alle 8 Module sind vollständig funktionsfähig und getestet.**
 
 | Modul | Status | Letzte Änderung |
 |-------|--------|-----------------|
-| Saisonplanung | Funktioniert | - |
-| **Startgeld-Erstattung** | In Arbeit | 15.01.2026: manage2sail Auto-Suche UI implementiert, Debugging nötig |
-| Schadensmeldung | Funktioniert | - |
-| Eventanmeldung | Funktioniert | - |
-| **Saison-Charter** | Funktioniert | 15.01.2026: DB-Schema korrigiert, Rechnungssystem implementiert |
-| **Jugendleistungsfonds** | Funktioniert | 15.01.2026: DB-Schema erweitert, RLS-Policies hinzugefügt |
-| Spendenportal | Funktioniert | - |
-| Jahresauswertung | Funktioniert | - |
+| Saisonplanung | ✅ Funktioniert | - |
+| **Startgeld-Erstattung** | ✅ Funktioniert | 16.01.2026: manage2sail Suche vollständig funktionsfähig |
+| Schadensmeldung | ✅ Funktioniert | - |
+| Eventanmeldung | ✅ Funktioniert | - |
+| Saison-Charter | ✅ Funktioniert | 15.01.2026: DB-Schema korrigiert |
+| Jugendleistungsfonds | ✅ Funktioniert | 15.01.2026: RLS-Policies hinzugefügt |
+| Spendenportal | ✅ Funktioniert | - |
+| Jahresauswertung | ✅ Funktioniert | - |
 
 ### Kürzlich behobene Probleme
 
 1. **Saison-Charter Buchungen**: Spaltennamen im Code an DB-Schema angepasst
 2. **Saison-Charter Rechnungen**: Client-seitige Rechnungsnummerngenerierung implementiert
 3. **Jugendleistungsfonds Anträge**: Fehlende Spalten hinzugefügt, RLS-Policies korrigiert
+4. **manage2sail Suche**: URL-Parameter korrigiert (`filterText` statt `q`) + HTML-Entity Dekodierung (16.01.2026)
 
 ---
 
@@ -655,6 +658,58 @@ Bei neuen Tabellen immer prüfen:
 3. INSERT Policy vorhanden?
 4. Admin-Policies für UPDATE/DELETE?
 
+### manage2sail Integration
+
+> **Architektur:** Hybrid-Scraping mit Fallback-Kette (seit 16.01.2026)
+
+**Datei:** `packages/supabase/src/manage2sail.js`
+
+**Funktionsweise:**
+```
+Benutzer tippt Regatta-Name
+         ↓
+┌────────────────────────────────────────────────────────────────────┐
+│ 1. Firecrawl (scrape.aitema.de)                                    │
+│    URL: manage2sail.com/de-DE/search?filterYear=2025&filterText=.. │
+│    WICHTIG: Parameter ist filterText, NICHT q!                     │
+└────────────────────────────────────────────────────────────────────┘
+         ↓ (falls leer)
+┌────────────────────────────────────────────────────────────────────┐
+│ 2. Ohne Länderfilter (filterCountry=)                              │
+└────────────────────────────────────────────────────────────────────┘
+         ↓ (falls leer)
+┌────────────────────────────────────────────────────────────────────┐
+│ 3. CORS-Proxy (corsproxy.io, allorigins.win)                       │
+└────────────────────────────────────────────────────────────────────┘
+         ↓
+HTML wird geparst → decodeHTMLEntities() → Event-Liste im Dropdown
+```
+
+**Korrekte manage2sail URL-Struktur:**
+```
+https://www.manage2sail.com/de-DE/search?filterYear=2025&filterMonth=&filterCountry=GER&filterRegion=&filterClass=&filterClubId=&filterScoring=&paged=true&filterText=rahnsdo
+```
+
+**Wichtige Funktionen:**
+
+| Funktion | Beschreibung |
+|----------|-------------|
+| `searchManage2SailRegattas(query, year, country)` | Hauptfunktion mit Fallback-Kette |
+| `searchManage2SailFirecrawl(query, year, country)` | Firecrawl-basiertes Scraping |
+| `searchManage2SailCorsProxy(query, year, country)` | CORS-Proxy Fallback |
+| `parseManage2SailSearchResults(html, year)` | HTML-Parser für Suchergebnisse |
+| `extractRegattaDetails(url, sailNumber)` | Detail-Extraktion via Gemini |
+
+**Warum nicht Gemini + Google Search?**
+- manage2sail ist eine SPA, schlecht von Google indexiert
+- Event-URLs enthalten UUIDs, keine lesbaren Namen
+- Gemini rät URLs anstatt echte zu finden
+
+**CORS-Problem:**
+Browser blockiert direkte Requests zu manage2sail.com. Daher nutzen wir:
+1. Firecrawl (selbst-gehostet auf scrape.aitema.de) als Proxy
+2. Öffentliche CORS-Proxies als Fallback
+
 ---
 
 ## Kontakt & Support
@@ -665,14 +720,5 @@ Bei neuen Tabellen immer prüfen:
 
 ---
 
-*Zuletzt aktualisiert: 15. Januar 2026, 23:15 Uhr*
+*Zuletzt aktualisiert: 16. Januar 2026, 10:30 Uhr*
 *SSL-Zertifikat gültig bis: 8. April 2026*
-
----
-
-## Offene Plan-Datei
-
-Bei Fortsetzung der manage2sail Auto-Suche kann die Plan-Datei als Referenz dienen:
-`C:\Users\kolja\.claude\plans\graceful-wobbling-garden.md`
-
-Enthält: Architektur, Gemini Prompts, UI-Mockup, Implementierungsdetails

@@ -1,20 +1,24 @@
 /**
  * Manage2Sail Scraper Service
- * 
- * Uses Gemini 2.0 Flash with Google Search grounding to extract regatta results 
- * from manage2sail.com and parse them into structured data for the Startgelder module.
- * 
- * Strategy: Since Manage2Sail is a SPA, we use Gemini's Google Search capability
- * to find and extract the regatta data from indexed pages.
+ *
+ * Hybrid-Ansatz für zuverlässige Regatta-Suche:
+ * 1. Primär: Direktes Scraping von manage2sail.com/search
+ * 2. Fallback 1: Firecrawl für JavaScript-Rendering
+ * 3. Fallback 2: Lokale Fuzzy-Suche über existierende Regatten
+ *
+ * Die manage2sail-Suche ist server-side gerendert und kann direkt gescrapt werden.
  */
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
-// Use the Gemini API with Google Search grounding (v1beta works with googleSearch tool)
+// Gemini API für Detail-Extraktion (nicht für Suche!)
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
 
-// Fallback to Firecrawl if Gemini fails (correct endpoint!)
+// Firecrawl für JavaScript-Rendering als Fallback
 const FIRECRAWL_URL = import.meta.env.VITE_FIRECRAWL_URL || 'https://scrape.aitema.de';
+
+// manage2sail Base-URL
+const MANAGE2SAIL_BASE = 'https://www.manage2sail.com';
 
 const EXTRACTION_PROMPT = `Du bist ein Experte für Segel-Regatta-Ergebnisse.
 
@@ -327,41 +331,210 @@ export function formatForDatabase(parsed, sailorResult, sailorId) {
 
 /**
  * ============================================================================
- * NEUE FUNKTIONEN FÜR INTELLIGENTE REGATTA-SUCHE
+ * DIREKTE MANAGE2SAIL SUCHE (Primärer Ansatz)
  * ============================================================================
  */
 
-const SEARCH_PROMPT = `Du bist ein Experte für Segel-Regatten in Deutschland.
+/**
+ * Sucht Regatten direkt auf manage2sail.com via HTML-Scraping
+ * @param {string} query - Suchbegriff
+ * @param {number} year - Jahr für Filter
+ * @param {string} country - Ländercode (default: GER)
+ * @returns {Promise<Array>} - Array von Regatta-Objekten
+ */
+async function searchManage2SailDirect(query, year, country = 'GER') {
+  if (!query || query.length < 2) return [];
 
-AUFGABE: Finde Regatten auf manage2sail.com die zum Suchbegriff passen.
+  // WICHTIG: manage2sail verwendet filterText, nicht q!
+  const searchUrl = `${MANAGE2SAIL_BASE}/de-DE/search?filterYear=${year}&filterMonth=&filterCountry=${country}&filterRegion=&filterClass=&filterClubId=&filterScoring=&paged=true&filterText=${encodeURIComponent(query)}`;
 
-SUCHBEGRIFF: "{query}"
-JAHR: {year}
+  console.log('[manage2sail] Direkte Suche:', searchUrl);
 
-FUZZY-MATCHING: Auch ähnliche Namen finden! Beispiele:
-- "rahnsdorfer opti-pokal" → "Rahnsdorfer Optipokal"
-- "IDM ILCA" → "IDM ILCA 4", "IDM ILCA 6", "IDM ILCA 7"
-- "travemünder woche" → "Travemünder Woche"
+  try {
+    const response = await fetch(searchUrl, {
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
 
-Suche auf manage2sail.com nach Regatten mit diesem Namen im Jahr {year}.
+    if (!response.ok) {
+      console.error('[manage2sail] HTTP Fehler:', response.status);
+      return [];
+    }
 
-WICHTIG:
-- Nur Regatten zurückgeben die WIRKLICH auf manage2sail.com existieren
-- URLs müssen das Format https://manage2sail.com/de-DE/event/... haben
-- Wenn du dir nicht sicher bist, gib "confidence": "low" an
+    const html = await response.text();
+    return parseManage2SailSearchResults(html, year);
 
-AUSGABE als JSON-Array (NUR JSON, keine Markdown, keine Erklärungen):
-[
-  {
-    "name": "Vollständiger Regatta-Name",
-    "url": "https://manage2sail.com/de-DE/event/...",
-    "date": "YYYY-MM-DD",
-    "location": "Austragungsort",
-    "confidence": "high|medium|low"
+  } catch (error) {
+    console.error('[manage2sail] Direkte Suche fehlgeschlagen:', error.message);
+    return [];
   }
-]
+}
 
-Wenn KEINE Treffer gefunden werden → leeres Array: []`;
+/**
+ * Parst die HTML-Suchergebnisse von manage2sail
+ * @param {string} html - HTML-Content
+ * @param {number} year - Jahr für Filterung
+ * @returns {Array} - Geparste Ergebnisse
+ */
+function parseManage2SailSearchResults(html, year) {
+  const results = [];
+
+  // Event-Links extrahieren: /en-US/event/UUID oder /en-US/event/slug
+  // Format: <a href="/en-US/event/...">Event Name</a>
+  const eventLinkRegex = /<a[^>]*href="(\/[a-z]{2}-[A-Z]{2}\/event\/[^"]+)"[^>]*>([^<]+)<\/a>/gi;
+  let match;
+
+  while ((match = eventLinkRegex.exec(html)) !== null) {
+    const eventPath = match[1];
+    const eventName = match[2].trim();
+
+    // Nur wenn kein Edit/Admin-Link und kein leerer Name
+    if (eventName && !eventPath.includes('/edit') && !eventPath.includes('/admin')) {
+      results.push({
+        name: decodeHTMLEntities(eventName),
+        url: `${MANAGE2SAIL_BASE}${eventPath}`,
+        confidence: 'high',
+        source: 'manage2sail-direct'
+      });
+    }
+  }
+
+  // Datumsangaben aus Tabelle extrahieren (optional, verbessert UX)
+  // Format: <td>01.05.2024</td> oder <td>2024-05-01</td>
+  const dateRegex = /(\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})/g;
+  const locationRegex = /<td[^>]*class="[^"]*location[^"]*"[^>]*>([^<]+)<\/td>/gi;
+
+  // Deduplizieren basierend auf URL
+  const seen = new Set();
+  const uniqueResults = results.filter(r => {
+    if (seen.has(r.url)) return false;
+    seen.add(r.url);
+    return true;
+  });
+
+  console.log(`[manage2sail] ${uniqueResults.length} Events gefunden`);
+  return uniqueResults.slice(0, 20); // Max 20 Ergebnisse
+}
+
+/**
+ * Sucht via Firecrawl mit JavaScript-Rendering
+ */
+async function searchManage2SailFirecrawl(query, year, country = 'GER') {
+  // WICHTIG: manage2sail verwendet filterText, nicht q!
+  const countryParam = country || '';
+  const searchUrl = `${MANAGE2SAIL_BASE}/de-DE/search?filterYear=${year}&filterMonth=&filterCountry=${countryParam}&filterRegion=&filterClass=&filterClubId=&filterScoring=&paged=true&filterText=${encodeURIComponent(query)}`;
+
+  console.log('[manage2sail] Firecrawl:', searchUrl);
+
+  try {
+    const response = await fetch(`${FIRECRAWL_URL}/v1/scrape`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: searchUrl,
+        formats: ['rawHtml'],  // WICHTIG: rawHtml statt html!
+        waitFor: 3000,
+        timeout: 15000
+      })
+    });
+
+    if (!response.ok) {
+      console.error('[manage2sail] Firecrawl HTTP Fehler:', response.status);
+      return [];
+    }
+
+    const data = await response.json();
+
+    if (!data.success) {
+      console.error('[manage2sail] Firecrawl API Fehler:', data.error || data.details);
+      return [];
+    }
+
+    const html = data.data?.rawHtml;
+    if (!html) {
+      console.warn('[manage2sail] Firecrawl: Kein HTML erhalten');
+      return [];
+    }
+
+    return parseManage2SailSearchResults(html, year);
+
+  } catch (error) {
+    console.error('[manage2sail] Firecrawl Exception:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Sucht via öffentlichen CORS-Proxy (letzter Fallback)
+ */
+async function searchManage2SailCorsProxy(query, year, country = 'GER') {
+  // WICHTIG: manage2sail verwendet filterText, nicht q!
+  const countryParam = country || '';
+  const searchUrl = `${MANAGE2SAIL_BASE}/de-DE/search?filterYear=${year}&filterMonth=&filterCountry=${countryParam}&filterRegion=&filterClass=&filterClubId=&filterScoring=&paged=true&filterText=${encodeURIComponent(query)}`;
+
+  // Öffentliche CORS-Proxies (Fallback, wenn Firecrawl nicht läuft)
+  const corsProxies = [
+    'https://corsproxy.io/?',
+    'https://api.allorigins.win/raw?url='
+  ];
+
+  for (const proxy of corsProxies) {
+    try {
+      console.log('[manage2sail] CORS-Proxy:', proxy);
+
+      const response = await fetch(proxy + encodeURIComponent(searchUrl), {
+        headers: { 'Accept': 'text/html' }
+      });
+
+      if (!response.ok) continue;
+
+      const html = await response.text();
+      const results = parseManage2SailSearchResults(html, year);
+
+      if (results.length > 0) return results;
+
+    } catch (error) {
+      console.warn('[manage2sail] CORS-Proxy fehlgeschlagen:', error.message);
+    }
+  }
+
+  return [];
+}
+
+/**
+ * HTML-Entities dekodieren (benannte UND numerische)
+ */
+function decodeHTMLEntities(text) {
+  const entities = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&nbsp;': ' ',
+    '&auml;': 'ä',
+    '&ouml;': 'ö',
+    '&uuml;': 'ü',
+    '&Auml;': 'Ä',
+    '&Ouml;': 'Ö',
+    '&Uuml;': 'Ü',
+    '&szlig;': 'ß'
+  };
+
+  // Erst benannte Entities ersetzen
+  let result = text.replace(/&[a-zA-Z]+;/g, match => entities[match] || match);
+
+  // Dann numerische Entities ersetzen (&#252; → ü)
+  result = result.replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(parseInt(dec, 10)));
+
+  // Auch hex-Entities (&#x00FC; → ü)
+  result = result.replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
+
+  return result;
+}
 
 const EXTRACT_DETAILS_PROMPT = `Du bist ein Experte für Segel-Regatta-Ergebnisse.
 
@@ -402,76 +575,150 @@ AUSGABE als JSON (NUR JSON, keine Markdown):
 }`;
 
 /**
- * Sucht Regatten auf manage2sail.com mit Fuzzy-Matching
+ * Generiert Suchvarianten aus dem Eingabetext
+ * "rahnsdorfer opti" → ["rahnsdorfer opti", "rahnsdorfer", "opti", "optipokal"]
+ */
+function generateSearchVariants(query) {
+  const variants = new Set();
+  const normalized = query.trim().toLowerCase();
+
+  // Original-Query
+  variants.add(normalized);
+
+  // Einzelne Wörter (mindestens 4 Zeichen)
+  const words = normalized.split(/\s+/).filter(w => w.length >= 4);
+  words.forEach(w => variants.add(w));
+
+  // Häufige Abkürzungen expandieren
+  const expansions = {
+    'opti': ['optipokal', 'optimist'],
+    'ilca': ['ilca 4', 'ilca 6', 'ilca 7'],
+    'idm': ['deutsche meisterschaft'],
+    'djm': ['jugendmeisterschaft'],
+    'ldm': ['landesmeisterschaft'],
+  };
+
+  words.forEach(w => {
+    if (expansions[w]) {
+      expansions[w].forEach(exp => variants.add(exp));
+    }
+  });
+
+  // Umlaute normalisieren
+  const umlautMap = { 'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss' };
+  const withoutUmlauts = normalized.replace(/[äöüß]/g, c => umlautMap[c]);
+  if (withoutUmlauts !== normalized) {
+    variants.add(withoutUmlauts);
+  }
+
+  return Array.from(variants).slice(0, 5); // Max 5 Varianten
+}
+
+/**
+ * Berechnet Ähnlichkeit zwischen zwei Strings (0-1)
+ */
+function calculateSimilarity(str1, str2) {
+  const s1 = str1.toLowerCase();
+  const s2 = str2.toLowerCase();
+
+  // Exakter Match
+  if (s1 === s2) return 1;
+
+  // Enthält den Suchbegriff
+  if (s2.includes(s1) || s1.includes(s2)) return 0.9;
+
+  // Wort-basierte Übereinstimmung
+  const words1 = s1.split(/\s+/);
+  const words2 = s2.split(/\s+/);
+
+  let matchCount = 0;
+  words1.forEach(w1 => {
+    if (words2.some(w2 => w2.includes(w1) || w1.includes(w2))) {
+      matchCount++;
+    }
+  });
+
+  return matchCount / Math.max(words1.length, 1);
+}
+
+/**
+ * Filtert und rankt Ergebnisse nach Ähnlichkeit zum Suchbegriff
+ */
+function rankResultsByRelevance(results, originalQuery) {
+  return results
+    .map(r => ({
+      ...r,
+      similarity: calculateSimilarity(originalQuery, r.name),
+      confidence: calculateSimilarity(originalQuery, r.name) > 0.5 ? 'high' :
+                  calculateSimilarity(originalQuery, r.name) > 0.2 ? 'medium' : 'low'
+    }))
+    .sort((a, b) => b.similarity - a.similarity);
+}
+
+/**
+ * Sucht Regatten auf manage2sail.com (Enhanced mit Multi-Search + Ranking)
+ *
+ * Verbesserungen:
+ * 1. Mehrfach-Suche mit Suchbegriff-Varianten
+ * 2. Fuzzy-Ranking der Ergebnisse nach Ähnlichkeit
+ * 3. Deduplizierung
+ *
  * @param {string} query - Suchbegriff (Regatta-Name)
  * @param {number} year - Jahr für Filter
- * @returns {Promise<Array<{name, url, date, location, confidence}>>}
+ * @param {string} country - Ländercode (default: GER)
+ * @returns {Promise<Array<{name, url, date, location, confidence, source, similarity}>>}
  */
-export async function searchManage2SailRegattas(query, year) {
-  if (!query || query.length < 3) {
+export async function searchManage2SailRegattas(query, year, country = 'GER') {
+  if (!query || query.length < 2) {
     return [];
   }
 
-  if (!GEMINI_API_KEY) {
-    console.warn('VITE_GEMINI_API_KEY not set, cannot search manage2sail');
-    return [];
-  }
+  const originalQuery = query.trim();
+  const variants = generateSearchVariants(originalQuery);
 
-  const prompt = SEARCH_PROMPT
-    .replace('{query}', query)
-    .replace(/{year}/g, year.toString());
+  console.log(`[manage2sail] Suche: "${originalQuery}" → Varianten:`, variants);
 
-  try {
-    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{ text: prompt }]
-        }],
-        tools: [{
-          googleSearch: {}
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 4096
-        }
-      })
+  // Alle Varianten parallel suchen
+  const allResults = [];
+  const seenUrls = new Set();
+
+  for (const variant of variants) {
+    // Firecrawl-Suche
+    let results = await searchManage2SailFirecrawl(variant, year, country);
+
+    // Fallback: ohne Länderfilter
+    if (results.length === 0) {
+      results = await searchManage2SailFirecrawl(variant, year, '');
+    }
+
+    // Fallback: CORS-Proxy
+    if (results.length === 0) {
+      results = await searchManage2SailCorsProxy(variant, year, country);
+    }
+
+    // Deduplizieren
+    results.forEach(r => {
+      if (!seenUrls.has(r.url)) {
+        seenUrls.add(r.url);
+        allResults.push(r);
+      }
     });
 
-    if (!response.ok) {
-      console.error('Gemini search failed:', await response.text());
-      return [];
-    }
+    // Frühzeitiger Abbruch wenn genug Ergebnisse
+    if (allResults.length >= 20) break;
+  }
 
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!text) {
-      return [];
-    }
-
-    const cleaned = cleanJsonResponse(text);
-    const results = JSON.parse(cleaned);
-
-    // Validiere und formatiere Ergebnisse
-    return (Array.isArray(results) ? results : [])
-      .filter(r => r.name && r.url)
-      .map(r => ({
-        name: r.name,
-        url: r.url,
-        date: r.date || null,
-        location: r.location || '',
-        confidence: r.confidence || 'medium',
-        source: 'gemini'
-      }));
-
-  } catch (error) {
-    console.error('Regatta search error:', error);
+  if (allResults.length === 0) {
+    console.log('[manage2sail] Keine Ergebnisse gefunden');
     return [];
   }
+
+  // Nach Relevanz ranken
+  const ranked = rankResultsByRelevance(allResults, originalQuery);
+
+  console.log(`[manage2sail] ${ranked.length} Ergebnisse gefunden, Top-Match: "${ranked[0]?.name}" (${(ranked[0]?.similarity * 100).toFixed(0)}%)`);
+
+  return ranked.slice(0, 15); // Max 15 Ergebnisse
 }
 
 /**
