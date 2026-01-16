@@ -194,8 +194,9 @@ Erfasse Regatta-Teilnahmen automatisch über manage2sail und erstelle Erstattung
 
 | Feature | Beschreibung |
 |---------|-------------|
-| **manage2sail Auto-Suche** | Intelligente Suche mit Fuzzy-Matching (NEU, in Arbeit) |
-| manage2sail Integration | Automatischer Import von Regatta-Ergebnissen |
+| **Modus-Auswahl** | Wahl zwischen manage2sail Suche oder PDF Upload / Manuell |
+| **manage2sail Auto-Suche** | Intelligente Suche mit Fuzzy-Matching |
+| **PDF Upload / Manuell** | Sicherer Fallback wenn manage2sail nicht funktioniert |
 | Rechnungs-Upload | PDF/Bild Upload für Belege (verpflichtend) |
 | SEPA-Export | Sammelüberweisung generieren |
 | Auto-Berechnung | Erstattungsbetrag automatisch |
@@ -203,8 +204,9 @@ Erfasse Regatta-Teilnahmen automatisch über manage2sail und erstelle Erstattung
 **Seiten:** Dashboard, AddRegatta, Export, Settings
 
 **Technische Details (manage2sail Auto-Suche):**
-- Model: `gemini-2.0-flash-exp` mit `googleSearch` Tool (grounding)
-- Lokale Fuzzy-Suche: Fuse.js für fehlertolerante Eingaben
+- Scraping via Firecrawl (scrape.aitema.de) mit Fallback auf CORS-Proxies
+- URL-Parameter: `filterText` (nicht `q`!)
+- Lokale Fuzzy-Suche + Ranking nach Ähnlichkeit
 - Debounced Search: 500ms Verzögerung nach Eingabe
 - Jahr-Filter: Aktuelles Jahr + 2 Vorjahre
 - Auto-Fill: Name, Datum, Ort, Platzierung bei Auswahl
@@ -213,7 +215,7 @@ Erfasse Regatta-Teilnahmen automatisch über manage2sail und erstelle Erstattung
   - `apps/web/src/modules/startgelder/utils/fuzzySearch.js`
   - `packages/supabase/src/manage2sail.js`
 
-**Status:** UI implementiert, Suche liefert noch keine Ergebnisse (Debugging nötig)
+**Status:** ✅ Vollständig funktionsfähig (16.01.2026)
 
 ---
 
