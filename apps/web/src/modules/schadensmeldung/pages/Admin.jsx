@@ -12,13 +12,13 @@ const STATUS_OPTIONS = [
 export function AdminPage({ setCurrentPage }) {
   const { isDark } = useTheme();
   const { addToast } = useToast();
-  const { isAdmin, isTrainer, userRole } = useAuth();
+  const { isAdmin, isTrainer, canManageDamages, userRole } = useAuth();
   const { damageReports, updateReportStatus, equipmentTypes, equipment } = useData();
 
   const [selectedReport, setSelectedReport] = useState(null);
 
-  // Access control: Only admin can access this page
-  if (!isAdmin) {
+  // Access control: Only admin or Hängerwart can access this page
+  if (!canManageDamages) {
     return (
       <div className="space-y-6">
         <GlassCard className="text-center py-12">
@@ -33,13 +33,13 @@ export function AdminPage({ setCurrentPage }) {
             Kein Zugang
           </h2>
           <p className={`mb-4 ${isDark ? 'text-cream/60' : 'text-light-muted'}`}>
-            Der Verwaltungsbereich ist nur für Administratoren zugänglich.
+            Der Verwaltungsbereich ist nur für Administratoren und Hängerwarte zugänglich.
           </p>
           <p className={`text-sm mb-6 ${isDark ? 'text-cream/40' : 'text-light-muted'}`}>
             Deine aktuelle Rolle: <span className="font-medium">{userRole || 'Nicht erkannt'}</span>
           </p>
-          <Button onClick={() => setCurrentPage('list')} icon={Icons.arrowLeft}>
-            Zurück zur Übersicht
+          <Button onClick={() => setCurrentPage('report')} icon={Icons.arrowLeft}>
+            Zurück zum Formular
           </Button>
         </GlassCard>
       </div>
@@ -182,7 +182,16 @@ export function AdminPage({ setCurrentPage }) {
                           variant="secondary"
                           onClick={() => handleStatusChange(report.id, 'in_bearbeitung')}
                         >
-                          Bearbeiten
+                          In Bearbeitung
+                        </Button>
+                      )}
+                      {report.status === 'in_bearbeitung' && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleStatusChange(report.id, 'offen')}
+                        >
+                          Zurück auf Offen
                         </Button>
                       )}
                       <Button
@@ -231,7 +240,7 @@ export function AdminPage({ setCurrentPage }) {
               >
                 <div className={`w-8 h-8 mb-2 ${isDark ? 'text-gold-400' : 'text-teal-500'}`}>
                   {type.name === 'segelboot' && Icons.sailboat}
-                  {type.name === 'motorboot' && Icons.boat}
+                  {type.name === 'motorboot' && Icons.motorboat}
                   {type.name === 'haenger' && Icons.truck}
                 </div>
                 <div className={`text-lg font-bold ${isDark ? 'text-cream' : 'text-light-text'}`}>

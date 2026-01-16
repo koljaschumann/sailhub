@@ -127,6 +127,98 @@ export default function Admin() {
 
       {/* Main Content */}
       <main className="max-w-6xl mx-auto px-4 py-8">
+        {/* Modul-Verwaltung */}
+        <GlassCard className="mb-8">
+          <h2 className={`text-lg font-semibold mb-4 ${isDark ? 'text-cream' : 'text-light-text'}`}>
+            Modul-Verwaltung
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Link
+              to="/saisoncharter?page=admin"
+              className={`p-4 rounded-xl border transition-colors flex flex-col items-center gap-2 ${
+                isDark
+                  ? 'bg-navy-800/50 border-navy-700 hover:border-cyan-400 hover:bg-navy-800'
+                  : 'bg-light-border/30 border-light-border hover:border-teal-500'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                isDark ? 'bg-cyan-400/10 text-cyan-400' : 'bg-cyan-100 text-cyan-600'
+              }`}>
+                {Icons.sailboat}
+              </div>
+              <span className={`text-sm font-medium ${isDark ? 'text-cream' : 'text-light-text'}`}>
+                Charter-Boote
+              </span>
+              <span className={`text-xs ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+                Boote & Buchungen
+              </span>
+            </Link>
+
+            <Link
+              to="/schadensmeldung"
+              className={`p-4 rounded-xl border transition-colors flex flex-col items-center gap-2 ${
+                isDark
+                  ? 'bg-navy-800/50 border-navy-700 hover:border-coral hover:bg-navy-800'
+                  : 'bg-light-border/30 border-light-border hover:border-red-500'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                isDark ? 'bg-coral/10 text-coral' : 'bg-red-100 text-red-600'
+              }`}>
+                {Icons.warning}
+              </div>
+              <span className={`text-sm font-medium ${isDark ? 'text-cream' : 'text-light-text'}`}>
+                Schadensmeldungen
+              </span>
+              <span className={`text-xs ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+                Meldungen & Equipment
+              </span>
+            </Link>
+
+            <Link
+              to="/saisonplanung"
+              className={`p-4 rounded-xl border transition-colors flex flex-col items-center gap-2 ${
+                isDark
+                  ? 'bg-navy-800/50 border-navy-700 hover:border-gold-400 hover:bg-navy-800'
+                  : 'bg-light-border/30 border-light-border hover:border-amber-500'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                isDark ? 'bg-gold-400/10 text-gold-400' : 'bg-amber-100 text-amber-600'
+              }`}>
+                {Icons.calendar}
+              </div>
+              <span className={`text-sm font-medium ${isDark ? 'text-cream' : 'text-light-text'}`}>
+                Saisonplanung
+              </span>
+              <span className={`text-xs ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+                Events & Motorboote
+              </span>
+            </Link>
+
+            <Link
+              to="/eventanmeldung"
+              className={`p-4 rounded-xl border transition-colors flex flex-col items-center gap-2 ${
+                isDark
+                  ? 'bg-navy-800/50 border-navy-700 hover:border-purple-400 hover:bg-navy-800'
+                  : 'bg-light-border/30 border-light-border hover:border-purple-500'
+              }`}
+            >
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                isDark ? 'bg-purple-400/10 text-purple-400' : 'bg-purple-100 text-purple-600'
+              }`}>
+                {Icons.users}
+              </div>
+              <span className={`text-sm font-medium ${isDark ? 'text-cream' : 'text-light-text'}`}>
+                Eventanmeldung
+              </span>
+              <span className={`text-xs ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+                Anmeldungen verwalten
+              </span>
+            </Link>
+          </div>
+        </GlassCard>
+
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
           <GlassCard className="text-center">

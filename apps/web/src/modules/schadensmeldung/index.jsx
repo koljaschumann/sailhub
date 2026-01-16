@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTheme, FeedbackWidget, DonateButton } from '@tsc/ui';
+import { useAuth } from '@tsc/supabase';
 import { DataProvider } from './context/DataContext';
 import { Navigation } from './components/Navigation';
 import { ReportFormPage, ReportListPage, AdminPage, EquipmentPage } from './pages';
@@ -26,6 +27,19 @@ function LoadingScreen() {
 function SchadensmeldungContent({ onBackToDashboard }) {
   const [currentPage, setCurrentPage] = useState('report');
   const { isDark } = useTheme();
+  const { isAdmin, isTrainer, canManageDamages } = useAuth();
+
+  // Route protection: Redirect from protected pages if not authorized
+  useEffect(() => {
+    // Übersicht (list) nur für Admin und Trainer
+    if (currentPage === 'list' && !isAdmin && !isTrainer) {
+      setCurrentPage('report');
+    }
+    // Admin und Equipment nur für canManageDamages (Admin oder Hängerwart)
+    if ((currentPage === 'admin' || currentPage === 'equipment') && !canManageDamages) {
+      setCurrentPage('report');
+    }
+  }, [currentPage, isAdmin, isTrainer, canManageDamages]);
 
   const renderPage = () => {
     switch (currentPage) {

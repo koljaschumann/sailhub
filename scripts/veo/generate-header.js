@@ -4,7 +4,11 @@
  * Using Google Veo 3.1 API
  */
 
-const API_KEY = process.env.VEO_API_KEY || 'REMOVED_API_KEY';
+const API_KEY = process.env.VEO_API_KEY;
+if (!API_KEY) {
+    console.error('Error: VEO_API_KEY environment variable is not set');
+    process.exit(1);
+}
 const MODEL = 'veo-3.1-generate-preview';
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 

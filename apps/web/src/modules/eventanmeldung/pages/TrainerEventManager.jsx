@@ -47,6 +47,7 @@ export function TrainerEventManagerPage() {
     end_date: '',
     location: '',
     description: '',
+    registration_deadline: '',
     has_costs: false,
     cost_description: '',
     estimated_cost: '',
@@ -79,6 +80,7 @@ export function TrainerEventManagerPage() {
       end_date: '',
       location: '',
       description: '',
+      registration_deadline: '',
       has_costs: false,
       cost_description: '',
       estimated_cost: '',
@@ -107,6 +109,7 @@ export function TrainerEventManagerPage() {
       end_date: formatDateForInput(event.end_date),
       location: event.location || '',
       description: event.description || '',
+      registration_deadline: formatDateForInput(event.registration_deadline),
       has_costs: event.has_costs || false,
       cost_description: event.cost_description || '',
       estimated_cost: event.estimated_cost || '',
@@ -161,6 +164,7 @@ export function TrainerEventManagerPage() {
         end_date: formData.end_date,
         location: formData.location || null,
         description: formData.description || null,
+        registration_deadline: formData.registration_deadline || null,
         has_costs: formData.has_costs,
         cost_description: formData.has_costs ? formData.cost_description : null,
         estimated_cost: formData.has_costs && formData.estimated_cost ? parseFloat(formData.estimated_cost) : null,
@@ -510,6 +514,26 @@ export function TrainerEventManagerPage() {
                   : 'bg-white border-light-border text-light-text'
               }`}
             />
+          </div>
+
+          {/* Registration Deadline */}
+          <div>
+            <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-cream/80' : 'text-light-text'}`}>
+              Anmeldeschluss
+            </label>
+            <input
+              type="date"
+              value={formData.registration_deadline}
+              onChange={(e) => setFormData(prev => ({ ...prev, registration_deadline: e.target.value }))}
+              className={`w-full px-4 py-3 rounded-xl border transition-colors ${
+                isDark
+                  ? 'bg-navy-800 border-navy-700 text-cream'
+                  : 'bg-white border-light-border text-light-text'
+              }`}
+            />
+            <p className={`mt-1 text-xs ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+              Nach diesem Datum sind keine Anmeldungen mehr möglich
+            </p>
           </div>
 
           {/* Cost Toggle */}

@@ -14,8 +14,15 @@ export function Navigation({ currentPage, setCurrentPage, onBackToDashboard }) {
     { id: 'dashboard', label: 'Dashboard', icon: Icons.home },
     { id: 'events', label: 'Veranstaltungen', icon: Icons.calendar },
     { id: 'overview', label: 'Saisonübersicht', icon: Icons.trophy },
-    { id: 'boats', label: 'Motorboote', icon: Icons.boat },
   ];
+
+  // Motorboote: Admin = voller Zugriff, Trainer = ausgegraut sichtbar, Segler/Eltern = nicht sichtbar
+  if (isAdmin) {
+    navItems.push({ id: 'boats', label: 'Motorboote', icon: Icons.boat });
+  } else if (isTrainer) {
+    navItems.push({ id: 'boats', label: 'Motorboote', icon: Icons.boat, disabled: true, tooltip: 'Nur für Admins' });
+  }
+  // Segler/Eltern sehen den Button nicht
 
   // Verwaltung nur für Admin
   if (isAdmin) {
@@ -59,17 +66,23 @@ export function Navigation({ currentPage, setCurrentPage, onBackToDashboard }) {
             {navItems.map(item => (
               <button
                 key={item.id}
-                onClick={() => setCurrentPage(item.id)}
+                onClick={() => !item.disabled && setCurrentPage(item.id)}
+                disabled={item.disabled}
+                title={item.tooltip}
                 className={`
                   px-4 py-2 rounded-full text-sm font-medium transition-all
                   flex items-center gap-2
-                  ${currentPage === item.id
+                  ${item.disabled
                     ? isDark
-                      ? 'bg-navy-700 text-cream'
-                      : 'bg-white text-light-text shadow-sm'
-                    : isDark
-                      ? 'text-cream/60 hover:text-cream hover:bg-navy-800/50'
-                      : 'text-light-muted hover:text-light-text hover:bg-light-border/50'}
+                      ? 'text-cream/30 cursor-not-allowed'
+                      : 'text-light-muted/50 cursor-not-allowed'
+                    : currentPage === item.id
+                      ? isDark
+                        ? 'bg-navy-700 text-cream'
+                        : 'bg-white text-light-text shadow-sm'
+                      : isDark
+                        ? 'text-cream/60 hover:text-cream hover:bg-navy-800/50'
+                        : 'text-light-muted hover:text-light-text hover:bg-light-border/50'}
                 `}
               >
                 <span className="w-4 h-4">{item.icon}</span>
@@ -139,17 +152,23 @@ export function Navigation({ currentPage, setCurrentPage, onBackToDashboard }) {
           {navItems.map(item => (
             <button
               key={item.id}
-              onClick={() => setCurrentPage(item.id)}
+              onClick={() => !item.disabled && setCurrentPage(item.id)}
+              disabled={item.disabled}
+              title={item.tooltip}
               className={`
                 px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap
                 flex items-center gap-1.5
-                ${currentPage === item.id
+                ${item.disabled
                   ? isDark
-                    ? 'bg-navy-700 text-cream'
-                    : 'bg-white text-light-text shadow-sm'
-                  : isDark
-                    ? 'text-cream/60 hover:text-cream'
-                    : 'text-light-muted hover:text-light-text'}
+                    ? 'text-cream/30 cursor-not-allowed'
+                    : 'text-light-muted/50 cursor-not-allowed'
+                  : currentPage === item.id
+                    ? isDark
+                      ? 'bg-navy-700 text-cream'
+                      : 'bg-white text-light-text shadow-sm'
+                    : isDark
+                      ? 'text-cream/60 hover:text-cream'
+                      : 'text-light-muted hover:text-light-text'}
               `}
             >
               <span className="w-3.5 h-3.5">{item.icon}</span>

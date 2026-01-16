@@ -3,15 +3,19 @@ import { useAuth } from '@tsc/supabase';
 
 export function Navigation({ currentPage, setCurrentPage, onBackToDashboard }) {
   const { isDark, toggleTheme } = useTheme();
-  const { isAdmin, isTrainer } = useAuth();
+  const { isAdmin, isTrainer, canManageDamages } = useAuth();
 
   const tabs = [
     { id: 'report', icon: Icons.plus, label: 'Melden' },
-    { id: 'list', icon: Icons.list, label: 'Übersicht' },
   ];
 
-  // Verwaltung nur für Admin
-  if (isAdmin) {
+  // Übersicht nur für Admin und Trainer sichtbar
+  if (isAdmin || isTrainer) {
+    tabs.push({ id: 'list', icon: Icons.list, label: 'Übersicht' });
+  }
+
+  // Verwaltung nur für Admin oder Hängerwart
+  if (canManageDamages) {
     tabs.push({ id: 'admin', icon: Icons.settings, label: 'Verwaltung' });
   }
 

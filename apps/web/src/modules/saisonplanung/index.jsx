@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTheme, FeedbackWidget, DonateButton } from '@tsc/ui';
 import { useAuth } from '@tsc/supabase';
 import { DataProvider, useData } from './context/DataContext';
@@ -31,6 +31,14 @@ function LoadingScreen() {
 function SaisonplanungContent({ onBackToDashboard }) {
   const [currentPage, setCurrentPage] = useState('dashboard');
   const { loading: dataLoading } = useData();
+  const { isAdmin } = useAuth();
+
+  // Route-Schutz: Nicht-Admins werden von geschützten Seiten umgeleitet
+  useEffect(() => {
+    if (!isAdmin && (currentPage === 'boats' || currentPage === 'admin')) {
+      setCurrentPage('dashboard');
+    }
+  }, [currentPage, isAdmin]);
 
   if (dataLoading) {
     return <LoadingScreen />;
@@ -45,9 +53,10 @@ function SaisonplanungContent({ onBackToDashboard }) {
       case 'overview':
         return <OverviewPage />;
       case 'boats':
-        return <BoatsPage />;
+        // Nur Admins haben Zugriff auf die Motorboot-Verwaltung
+        return isAdmin ? <BoatsPage /> : <DashboardPage setCurrentPage={setCurrentPage} />;
       case 'admin':
-        return <AdminPage />;
+        return isAdmin ? <AdminPage /> : <DashboardPage setCurrentPage={setCurrentPage} />;
       default:
         return <DashboardPage setCurrentPage={setCurrentPage} />;
     }

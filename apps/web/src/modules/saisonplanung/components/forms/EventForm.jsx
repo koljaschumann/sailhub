@@ -51,7 +51,19 @@ export function EventForm({ onSuccess, editEvent = null }) {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+
+    // Wenn Startdatum gesetzt wird, Enddatum automatisch anpassen
+    if (name === 'startDate' && value) {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value,
+        // Enddatum auf Startdatum setzen, wenn leer oder kleiner als neues Startdatum
+        endDate: (!prev.endDate || prev.endDate < value) ? value : prev.endDate
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
+
     // Clear error when field is edited
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: null }));

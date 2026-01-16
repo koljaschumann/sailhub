@@ -14,7 +14,7 @@ const BOAT_TYPE_LABELS = {
 export function BookingFormPage({ setCurrentPage }) {
   const { isDark } = useTheme();
   const { addToast } = useToast();
-  const { getActiveSeason, getAvailableBoats, charterReasons, addBooking, loading } = useData();
+  const { getActiveSeason, getAvailableBoats, addBooking, loading } = useData();
 
   const season = getActiveSeason();
   const availableBoats = getAvailableBoats();
@@ -26,7 +26,6 @@ export function BookingFormPage({ setCurrentPage }) {
   const [sailorBirthDate, setSailorBirthDate] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
-  const [reason, setReason] = useState('');
   const [notes, setNotes] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
 
@@ -38,6 +37,10 @@ export function BookingFormPage({ setCurrentPage }) {
     acc[boat.boat_type].push(boat);
     return acc;
   }, {});
+
+  // Get selected boat and its price
+  const selectedBoat = availableBoats.find(b => b.id === selectedBoatId);
+  const getBoatPrice = (boat) => boat?.charter_fee || season?.price || 0;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -55,12 +58,12 @@ export function BookingFormPage({ setCurrentPage }) {
     try {
       await addBooking({
         boat_id: selectedBoatId,
+        boat_type: selectedBoat?.boat_type,
         sailor_first_name: sailorFirstName.trim(),
         sailor_last_name: sailorLastName.trim(),
         sailor_birth_date: sailorBirthDate,
         contact_email: contactEmail.trim(),
         contact_phone: contactPhone.trim() || undefined,
-        reason,
         notes: notes.trim() || undefined,
       });
 
@@ -118,10 +121,18 @@ export function BookingFormPage({ setCurrentPage }) {
               </div>
               <div>
                 <span className="font-medium">Pauschale:</span><br />
-                <span className={`text-lg font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                  {season.price}€
-                </span>
-                <span className="text-xs ml-1">pro Saison</span>
+                {selectedBoat ? (
+                  <>
+                    <span className={`text-lg font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                      {getBoatPrice(selectedBoat)}€
+                    </span>
+                    <span className="text-xs ml-1">für {selectedBoat.name}</span>
+                  </>
+                ) : (
+                  <span className={`text-sm ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+                    Wähle ein Boot aus
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -163,7 +174,16 @@ export function BookingFormPage({ setCurrentPage }) {
                                 : 'bg-white border-light-border text-light-text hover:border-gray-300'
                           }`}
                         >
-                          <div className="font-medium">{boat.name}</div>
+                          <div className="flex items-center justify-between">
+                            <div className="font-medium">{boat.name}</div>
+                            <div className={`text-sm font-semibold ${
+                              selectedBoatId === boat.id
+                                ? isDark ? 'text-emerald-400' : 'text-emerald-600'
+                                : isDark ? 'text-cream/70' : 'text-light-muted'
+                            }`}>
+                              {getBoatPrice(boat)}€
+                            </div>
+                          </div>
                           <div className={`text-xs ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
                             {boat.sail_number}
                           </div>
@@ -278,46 +298,22 @@ export function BookingFormPage({ setCurrentPage }) {
             </div>
           </div>
 
-          {/* Reason & Notes */}
+          {/* Notes */}
           <div className={`border-t pt-6 ${isDark ? 'border-navy-700' : 'border-light-border'}`}>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-cream/80' : 'text-light-text'}`}>
-                  Verwendungszweck *
-                </label>
-                <select
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  required
-                  className={`w-full px-4 py-3 rounded-xl border transition-colors ${
-                    isDark
-                      ? 'bg-navy-800 border-navy-700 text-cream'
-                      : 'bg-white border-light-border text-light-text'
-                  }`}
-                >
-                  <option value="">Bitte wählen...</option>
-                  {charterReasons.map(r => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-cream/80' : 'text-light-text'}`}>
-                  Anmerkungen
-                </label>
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Optional..."
-                  className={`w-full px-4 py-3 rounded-xl border transition-colors ${
-                    isDark
-                      ? 'bg-navy-800 border-navy-700 text-cream placeholder:text-cream/30'
-                      : 'bg-white border-light-border text-light-text'
-                  }`}
-                />
-              </div>
-            </div>
+            <label className={`block text-sm font-medium mb-2 ${isDark ? 'text-cream/80' : 'text-light-text'}`}>
+              Anmerkungen
+            </label>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional..."
+              className={`w-full px-4 py-3 rounded-xl border transition-colors ${
+                isDark
+                  ? 'bg-navy-800 border-navy-700 text-cream placeholder:text-cream/30'
+                  : 'bg-white border-light-border text-light-text'
+              }`}
+            />
           </div>
 
           {/* Terms */}
@@ -333,7 +329,7 @@ export function BookingFormPage({ setCurrentPage }) {
                 }`}
               />
               <span className={`text-sm ${isDark ? 'text-cream/80' : 'text-light-text'}`}>
-                Ich akzeptiere die Charter-Bedingungen des TSC. Die Pauschale von {season.price}€ für die Saison wird per Rechnung erhoben. Ich bin für die pflegliche Behandlung des Bootes verantwortlich und melde Schäden unverzüglich. *
+                Ich akzeptiere die Charter-Bedingungen des TSC. Die Pauschale für die Saison wird per Rechnung erhoben. Ich bin für die pflegliche Behandlung des Bootes verantwortlich und melde Schäden unverzüglich. *
               </span>
             </label>
           </div>

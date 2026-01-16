@@ -2,7 +2,7 @@
 
 > Diese Regeln gelten für alle AI-Assistenten (Claude, Gemini, etc.) und menschliche Entwickler.
 >
-> **Aktueller Status:** v1.0-stable (14.01.2026) - Alle 8 Module funktionieren
+> **Aktueller Status:** v1.3-stable (16.01.2026) - Security Fix + Alle 8 Module + Edge Functions
 
 ---
 
@@ -293,6 +293,126 @@ VITE_SUPABASE_ANON_KEY=[Anon Key hier einfügen]
 
 ---
 
+## 🔐 API Keys & Secrets (KRITISCH!)
+
+### ❌ NIEMALS hardcoden
+
+| ❌ VERBOTEN | ✅ RICHTIG |
+|-------------|-----------|
+| `const API_KEY = 'AIzaSy...'` | `const API_KEY = process.env.API_KEY` |
+| `const TOKEN = 'ghp_...'` | `const TOKEN = import.meta.env.VITE_TOKEN` |
+| Fallback mit echtem Key | Fehler werfen wenn Key fehlt |
+
+**Beispiel für sicheres Pattern:**
+```javascript
+// ✅ RICHTIG - Fehler wenn nicht gesetzt
+const API_KEY = process.env.VEO_API_KEY;
+if (!API_KEY) {
+    console.error('Error: VEO_API_KEY environment variable is not set');
+    process.exit(1);
+}
+
+// ❌ FALSCH - Hardcoded Fallback (NIEMALS!)
+const API_KEY = process.env.VEO_API_KEY || 'AIzaSy...';
+```
+
+### Git Remote URLs
+
+**Niemals Tokens in Remote-URLs speichern:**
+```bash
+# ❌ FALSCH - Token exponiert
+git remote set-url origin https://ghp_xxx@github.com/user/repo.git
+
+# ✅ RICHTIG - Ohne Token
+git remote set-url origin https://github.com/user/repo.git
+```
+
+### Bei versehentlicher Exposition
+
+Falls ein Secret in Git committed wurde:
+
+1. **Secret sofort rotieren** (bei Provider löschen/neu erstellen)
+2. **Git-History bereinigen:**
+   ```bash
+   git stash  # Lokale Änderungen sichern
+   FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --force --tree-filter \
+     "sed -i 's/EXPOSED_KEY/REMOVED/g' path/to/file 2>/dev/null || true" \
+     --tag-name-filter cat -- --all
+   git for-each-ref --format='delete %(refname)' refs/original | git update-ref --stdin
+   git reflog expire --expire=now --all
+   git gc --prune=now --aggressive
+   git stash pop  # Änderungen zurückholen
+   ```
+3. **Force-Push:** `git push --force origin master`
+4. **GitHub Security Alert schließen** als "revoked"
+
+---
+
+## 📧 Edge Functions & E-Mail (Supabase + Resend)
+
+### Aktive Edge Functions
+
+| Function | Zweck | Datei |
+|----------|-------|-------|
+| `send-damage-notification` | E-Mail an Sportwart/Hängerwart bei neuer Schadensmeldung | `supabase/functions/send-damage-notification/index.ts` |
+| `send-damage-confirmation` | Bestätigungs-E-Mail an den Melder | `supabase/functions/send-damage-confirmation/index.ts` |
+
+### Edge Function erstellen/deployen
+
+**Via Supabase MCP-Tool:**
+```javascript
+mcp__plugin_supabase_supabase__deploy_edge_function({
+  project_id: "uyjelstoccrgexpxqiit",
+  name: "function-name",
+  entrypoint_path: "index.ts",
+  verify_jwt: true,
+  files: [{ name: "index.ts", content: "..." }]
+})
+```
+
+### Resend E-Mail-Versand
+
+**Pattern für E-Mail-Versand:**
+```typescript
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+
+const response = await fetch("https://api.resend.com/emails", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${RESEND_API_KEY}`,
+  },
+  body: JSON.stringify({
+    from: "SailHub <noreply@sailhub.aitema.de>",
+    to: [recipientEmail],
+    subject: "Betreff",
+    html: htmlContent,
+  }),
+});
+```
+
+**Wichtig:**
+- `RESEND_API_KEY` ist als Secret in Supabase Edge Functions konfiguriert
+- Absender-Domain `sailhub.aitema.de` muss in Resend verifiziert sein
+- E-Mails werden auf Deutsch verfasst
+
+### Edge Function aufrufen (Client-seitig)
+
+```javascript
+import { supabase } from '@tsc/supabase';
+
+const { data, error } = await supabase.functions.invoke('send-damage-notification', {
+  body: {
+    recipients: ['email@example.com'],
+    equipmentName: 'Boot XY',
+    description: 'Schaden beschreibung...',
+    // ... weitere Felder
+  },
+});
+```
+
+---
+
 ## 📝 Code-Kommentare & Dokumentation
 
 | Was | Sprache |
@@ -576,6 +696,39 @@ const allRegistrations = [...formatEventRegs(eventRegs), ...formatRegattaEntries
 Beide Buttons haben die gleiche Höhe (`h-10` = 40px) für einheitliches Aussehen.
 
 **Rechts unten reserviert für:** "Powered by Aitema" Badge
+
+### API Key in Git-History exponiert (16.01.2026)
+
+**Problem:** GitHub Security Alert - Google API Key wurde in `scripts/veo/generate-header.js` exponiert.
+
+**Ursache:** Hardcoded API Key als Fallback: `process.env.VEO_API_KEY || 'AIzaSy...'`
+
+**Lösung:**
+1. Hardcoded Fallback entfernt, nur noch Umgebungsvariable
+2. Git-History mit `filter-branch` bereinigt
+3. Alte Refs und Reflog gelöscht
+4. Force-Push zu GitHub
+5. GitHub Security Alert als "revoked" geschlossen
+
+**Vermeidung:**
+1. **NIEMALS** API Keys hardcoden, auch nicht als Fallback
+2. **IMMER** Umgebungsvariablen verwenden
+3. **Fehler werfen** wenn Key nicht gesetzt ist, nicht stillschweigend Fallback nutzen
+4. **Pre-commit hooks** einrichten um Secrets zu erkennen (z.B. `detect-secrets`)
+5. `.gitignore` für `.env` Dateien sicherstellen
+
+**Befehle für History-Bereinigung:**
+```bash
+git stash
+FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --force --tree-filter \
+  "sed -i 's/EXPOSED_KEY/REMOVED/g' path/to/file 2>/dev/null || true" \
+  --tag-name-filter cat -- --all
+git for-each-ref --format='delete %(refname)' refs/original | git update-ref --stdin
+git reflog expire --expire=now --all
+git gc --prune=now --aggressive
+git stash pop
+git push --force origin master
+```
 
 ---
 

@@ -194,17 +194,26 @@ Erfasse Regatta-Teilnahmen automatisch über manage2sail und erstelle Erstattung
 
 | Feature | Beschreibung |
 |---------|-------------|
+| **manage2sail Auto-Suche** | Intelligente Suche mit Fuzzy-Matching (NEU, in Arbeit) |
 | manage2sail Integration | Automatischer Import von Regatta-Ergebnissen |
-| Rechnungs-Upload | PDF/Bild Upload für Belege |
+| Rechnungs-Upload | PDF/Bild Upload für Belege (verpflichtend) |
 | SEPA-Export | Sammelüberweisung generieren |
 | Auto-Berechnung | Erstattungsbetrag automatisch |
 
 **Seiten:** Dashboard, AddRegatta, Export, Settings
 
-**Technische Details (manage2sail):**
-- Model: `gemini-2.0-flash-exp` mit `googleSearch` Tool
-- Extrahiert: Regatta-Name, Datum, Ort, Teilnehmerzahl, Ergebnisliste
-- Fallback: Firecrawl `/v1/scrape` bei API-Fehlern
+**Technische Details (manage2sail Auto-Suche):**
+- Model: `gemini-2.0-flash-exp` mit `googleSearch` Tool (grounding)
+- Lokale Fuzzy-Suche: Fuse.js für fehlertolerante Eingaben
+- Debounced Search: 500ms Verzögerung nach Eingabe
+- Jahr-Filter: Aktuelles Jahr + 2 Vorjahre
+- Auto-Fill: Name, Datum, Ort, Platzierung bei Auswahl
+- Relevante Dateien:
+  - `apps/web/src/modules/startgelder/pages/AddRegatta.jsx`
+  - `apps/web/src/modules/startgelder/utils/fuzzySearch.js`
+  - `packages/supabase/src/manage2sail.js`
+
+**Status:** UI implementiert, Suche liefert noch keine Ergebnisse (Debugging nötig)
 
 ---
 
@@ -538,6 +547,116 @@ ssh root@49.13.15.44
 
 ---
 
+## Current State (Stand: 15. Januar 2026)
+
+**Alle 8 Module sind vollständig funktionsfähig und getestet.**
+
+| Modul | Status | Letzte Änderung |
+|-------|--------|-----------------|
+| Saisonplanung | Funktioniert | - |
+| **Startgeld-Erstattung** | In Arbeit | 15.01.2026: manage2sail Auto-Suche UI implementiert, Debugging nötig |
+| Schadensmeldung | Funktioniert | - |
+| Eventanmeldung | Funktioniert | - |
+| **Saison-Charter** | Funktioniert | 15.01.2026: DB-Schema korrigiert, Rechnungssystem implementiert |
+| **Jugendleistungsfonds** | Funktioniert | 15.01.2026: DB-Schema erweitert, RLS-Policies hinzugefügt |
+| Spendenportal | Funktioniert | - |
+| Jahresauswertung | Funktioniert | - |
+
+### Kürzlich behobene Probleme
+
+1. **Saison-Charter Buchungen**: Spaltennamen im Code an DB-Schema angepasst
+2. **Saison-Charter Rechnungen**: Client-seitige Rechnungsnummerngenerierung implementiert
+3. **Jugendleistungsfonds Anträge**: Fehlende Spalten hinzugefügt, RLS-Policies korrigiert
+
+---
+
+## Development Rules
+
+### Datenbank-Schema Regeln
+
+> **WICHTIG**: Die Spalten im Code müssen exakt mit der Datenbank übereinstimmen!
+
+#### charter_bookings Tabelle
+
+| Code-Referenz | DB-Spalte | Hinweis |
+|---------------|-----------|---------|
+| `boat_id` | `assigned_boat_id` | FK zu charter_boats |
+| `sailor_first_name` + `sailor_last_name` | `sailor_name` | Kombiniert als ein Feld |
+| `contact_email` | `guardian_email` | Eltern/Erziehungsberechtigte |
+| `contact_phone` | `guardian_phone` | Optional |
+| `reason` | `charter_reason` | CHECK: 'alter', 'finanziell', 'einstieg', 'sonstiges' |
+| `status` | `status` | CHECK: 'beantragt', 'genehmigt', 'boot_zugewiesen', 'aktiv', 'beendet', 'abgelehnt' |
+
+#### funding_applications Tabelle
+
+| Spalte | Typ | Hinweis |
+|--------|-----|---------|
+| `applicant_first_name` | text | Antragsteller Vorname |
+| `applicant_last_name` | text | Antragsteller Nachname |
+| `applicant_birth_date` | date | Geburtsdatum |
+| `category` | text | Förderkategorie |
+| `title` | text | Antragstitel |
+| `description` | text | Beschreibung |
+| `total_amount` | numeric | Gesamtbetrag |
+| `status` | text | CHECK: 'entwurf', 'eingereicht', 'in_pruefung', 'genehmigt', 'abgelehnt', 'ausgezahlt' |
+
+#### charter_invoices Tabelle
+
+| Spalte | Typ | Hinweis |
+|--------|-----|---------|
+| `booking_id` | uuid | FK zu charter_bookings |
+| `invoice_number` | text | Format: TSC-SC-YYYY-XXXX (client-generiert) |
+| `amount` | numeric | Rechnungsbetrag |
+| `status` | text | 'erstellt', 'versendet', 'bezahlt', 'storniert' |
+| `recipient_name` | text | Empfängername |
+| `recipient_email` | text | Empfänger-E-Mail |
+
+### Admin-Zugang in Modulen
+
+Die "Verwaltung"-Tabs in Modulen sind **nur für Admins** sichtbar:
+
+```javascript
+// Navigation.jsx Pattern
+if (isAdmin) {
+  navItems.push({ id: 'admin', label: 'Verwaltung', icon: Icons.settings });
+}
+```
+
+Dies gilt für:
+- Saison-Charter → Verwaltung
+- Jugendleistungsfonds → Verwaltung
+- Spendenportal → Verwaltung
+- Eventanmeldung → Verwaltung
+
+### Rechnungsnummern-Generierung
+
+Rechnungsnummern werden **client-seitig** generiert (nicht via DB-Funktion):
+
+```javascript
+const year = new Date().getFullYear();
+const existingCount = invoices.filter(inv =>
+  inv.invoice_number?.startsWith(`TSC-SC-${year}`)
+).length;
+const nextNum = existingCount + 1;
+const invoiceNumber = `TSC-SC-${year}-${String(nextNum).padStart(4, '0')}`;
+```
+
+### RLS (Row Level Security)
+
+Alle Tabellen haben RLS aktiviert. Wichtige Policies:
+
+- **SELECT**: Authentifizierte Benutzer können eigene Daten sehen
+- **INSERT**: Authentifizierte Benutzer können eigene Einträge erstellen
+- **UPDATE/DELETE**: Nur Admins oder Eigentümer
+
+Bei neuen Tabellen immer prüfen:
+1. RLS aktiviert? (`ALTER TABLE ... ENABLE ROW LEVEL SECURITY`)
+2. SELECT Policy vorhanden?
+3. INSERT Policy vorhanden?
+4. Admin-Policies für UPDATE/DELETE?
+
+---
+
 ## Kontakt & Support
 
 - **Repository**: https://github.com/koljaschumann/tsc-jugend-plattform
@@ -546,5 +665,14 @@ ssh root@49.13.15.44
 
 ---
 
-*Zuletzt aktualisiert: 10. Januar 2026*
+*Zuletzt aktualisiert: 15. Januar 2026, 23:15 Uhr*
 *SSL-Zertifikat gültig bis: 8. April 2026*
+
+---
+
+## Offene Plan-Datei
+
+Bei Fortsetzung der manage2sail Auto-Suche kann die Plan-Datei als Referenz dienen:
+`C:\Users\kolja\.claude\plans\graceful-wobbling-garden.md`
+
+Enthält: Architektur, Gemini Prompts, UI-Mockup, Implementierungsdetails

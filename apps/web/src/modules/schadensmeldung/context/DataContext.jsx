@@ -130,6 +130,13 @@ export function DataProvider({ children }) {
   // E-Mail Versand
   // =============================================
 
+  // TODO: E-Mail-Adressen für Benachrichtigungen konfigurieren
+  // Diese Adressen müssen später mit den echten Adressen ersetzt werden
+  const NOTIFICATION_EMAILS = {
+    sportwart: '', // TODO: E-Mail-Adresse des Sportwarts eintragen
+    haengerwart: '', // TODO: E-Mail-Adresse des Hängerwarts eintragen
+  };
+
   /**
    * Send confirmation email via Edge Function
    */
@@ -143,6 +150,42 @@ export function DataProvider({ children }) {
     }
 
     return data;
+  };
+
+  /**
+   * Send notification email to Sportwart and Hängerwart
+   * TODO: Edge Function 'send-damage-notification' muss noch erstellt werden
+   */
+  const sendNotificationToAdmins = async (reportData) => {
+    // Skip if no email addresses configured
+    if (!NOTIFICATION_EMAILS.sportwart && !NOTIFICATION_EMAILS.haengerwart) {
+      console.log('Keine Benachrichtigungs-E-Mails konfiguriert');
+      return;
+    }
+
+    const recipients = [];
+    if (NOTIFICATION_EMAILS.sportwart) recipients.push(NOTIFICATION_EMAILS.sportwart);
+    if (NOTIFICATION_EMAILS.haengerwart) recipients.push(NOTIFICATION_EMAILS.haengerwart);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('send-damage-notification', {
+        body: {
+          recipients,
+          equipmentName: reportData.equipment?.name || 'Unbekannt',
+          equipmentType: reportData.equipment?.type?.display_name || 'Equipment',
+          description: reportData.description,
+          reporterName: reportData.reporter_name,
+          reportId: reportData.id,
+          createdAt: reportData.created_at,
+        },
+      });
+
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.error('Error sending admin notification:', err);
+      // Fehler soll Schadensmeldung nicht blockieren
+    }
   };
 
   // =============================================
@@ -234,6 +277,11 @@ export function DataProvider({ children }) {
           // E-Mail-Fehler soll nicht die Schadensmeldung blockieren
         });
       }
+
+      // Benachrichtigung an Sportwart und Hängerwart senden
+      sendNotificationToAdmins(newReport).catch(err => {
+        console.error('Error sending admin notification:', err);
+      });
 
       return newReport;
 

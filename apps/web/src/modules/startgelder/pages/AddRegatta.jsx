@@ -1,127 +1,164 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useTheme, GlassCard, Button, Icons, useToast } from '@tsc/ui';
 import { useData, BOAT_CLASSES } from '../context/DataContext';
+import { searchManage2SailRegattas, extractRegattaDetails } from '@tsc/supabase';
 import { extractTextFromPDF, parseRegattaPDF, parseInvoicePDF, performOCR } from '../utils/pdfParser';
+import { fuzzySearchRegattas, deduplicateResults } from '../utils/fuzzySearch';
+
+// Debounce helper
+function debounce(fn, ms) {
+  let timeout;
+  return (...args) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => fn(...args), ms);
+  };
+}
 
 export function AddRegattaPage({ setCurrentPage }) {
   const { isDark } = useTheme();
   const { addToast } = useToast();
-  const { boatData, addRegatta, crewDatabase, addPdfAttachment, getMaxCrewCount } = useData();
+  const { boatData, addRegatta, crewDatabase, addPdfAttachment, getMaxCrewCount, regattas: existingRegattas } = useData();
 
-  // Mode: 'upload' | 'search' | 'manual'
-  const [addMode, setAddMode] = useState('upload');
-  const [step, setStep] = useState(0); // 0: Ergebnis, 1: Crew, 2: Rechnung
+  // Steps: 0 = Ergebnis suchen, 1 = Crew (nur Mehrpersonenboote), 2 = Rechnung
+  const [step, setStep] = useState(0);
 
-  // PDF Processing
-  const [pdfProcessing, setPdfProcessing] = useState(false);
-  const [invoiceProcessing, setInvoiceProcessing] = useState(false);
-  const [ocrProgress, setOcrProgress] = useState(null);
-  const [currentPdfData, setCurrentPdfData] = useState(null);
-  const [currentInvoiceData, setCurrentInvoiceData] = useState(null);
+  // Jahr-Auswahl
+  const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const years = [currentYear, currentYear - 1, currentYear - 2];
 
-  // Parsed/Manual Data
+  // Suche
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState(null);
+  const [selectedRegatta, setSelectedRegatta] = useState(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  // Detail-Extraktion
+  const [isExtracting, setIsExtracting] = useState(false);
+
+  // Formular-Daten (werden auto-gefüllt nach Auswahl)
   const [regattaName, setRegattaName] = useState('');
   const [date, setDate] = useState('');
   const [placement, setPlacement] = useState('');
   const [totalParticipants, setTotalParticipants] = useState('');
   const [raceCount, setRaceCount] = useState('');
-  const [invoiceAmount, setInvoiceAmount] = useState('');
-  const [selectedCrew, setSelectedCrew] = useState([]);
+  const [sailorFound, setSailorFound] = useState(null);
 
-  // Drag
-  const [isDragging, setIsDragging] = useState(false);
+  // Rechnung
+  const [invoiceAmount, setInvoiceAmount] = useState('');
+  const [currentInvoiceData, setCurrentInvoiceData] = useState(null);
+  const [invoiceProcessing, setInvoiceProcessing] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState(null);
   const [isDraggingInvoice, setIsDraggingInvoice] = useState(false);
-  const fileInputRef = useRef(null);
   const invoiceInputRef = useRef(null);
 
-  // manage2sail
-  const [m2sQuery, setM2sQuery] = useState('');
-  const [m2sSearching, setM2sSearching] = useState(false);
-  const [m2sResults, setM2sResults] = useState([]);
-  const [m2sError, setM2sError] = useState(null);
-
+  // Crew
+  const [selectedCrew, setSelectedCrew] = useState([]);
   const maxCrew = getMaxCrewCount(boatData.bootsklasse);
 
-  const handleFileDrop = async (e, isInvoice = false) => {
-    e.preventDefault();
-    if (isInvoice) setIsDraggingInvoice(false);
-    else setIsDragging(false);
-
-    const file = e.dataTransfer?.files[0] || e.target?.files[0];
-    if (!file) return;
-
-    if (isInvoice) {
-      await processInvoice(file);
-    } else {
-      await processResultPdf(file);
-    }
-  };
-
-  const processResultPdf = async (file) => {
-    if (!file.type.includes('pdf')) {
-      addToast('Bitte eine PDF-Datei auswählen', 'error');
+  // Debounced Suche
+  const performSearch = useCallback(async (query, year) => {
+    if (!query || query.length < 3) {
+      setSearchResults([]);
+      setShowDropdown(false);
       return;
     }
 
-    if (!boatData.segelnummer) {
-      addToast('Bitte zuerst die Segelnummer in den Einstellungen eingeben', 'error');
-      return;
-    }
-
-    setPdfProcessing(true);
+    setIsSearching(true);
+    setSearchError(null);
+    setShowDropdown(true);
 
     try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64 = e.target.result.split(',')[1];
-        setCurrentPdfData(base64);
+      // 1. Lokale Fuzzy-Suche (sofort)
+      const localResults = fuzzySearchRegattas(query, existingRegattas || []);
 
-        let text = await extractTextFromPDF(base64);
-        let useOCR = false;
+      // 2. Gemini-Suche auf manage2sail (parallel)
+      const geminiResults = await searchManage2SailRegattas(query, year);
 
-        if (!text || text.length < 200) {
-          console.log('Wenig Text, starte OCR...');
-          text = await performOCR(base64, setOcrProgress);
-          useOCR = true;
-        }
+      // 3. Kombinieren und deduplizieren
+      const combined = deduplicateResults([
+        ...localResults,
+        ...geminiResults
+      ]);
 
-        if (text) {
-          let result = parseRegattaPDF(text, boatData.segelnummer, boatData);
+      setSearchResults(combined);
 
-          if (!result.participant && !useOCR) {
-            console.log('Keine Platzierung gefunden, versuche OCR...');
-            const ocrText = await performOCR(base64, setOcrProgress);
-            if (ocrText) {
-              const ocrResult = parseRegattaPDF(ocrText, boatData.segelnummer, boatData);
-              if (ocrResult.participant) result = ocrResult;
-            }
-          }
-
-          // Fill form fields
-          if (result.regattaName) setRegattaName(result.regattaName);
-          if (result.participant?.rank) setPlacement(result.participant.rank.toString());
-          if (result.totalParticipants) setTotalParticipants(result.totalParticipants.toString());
-          if (result.raceCount) setRaceCount(result.raceCount.toString());
-          if (result.date) setDate(result.date);
-
-          if (result.success) {
-            addToast('Ergebnis erfolgreich erkannt!', 'success');
-          } else {
-            addToast(result.feedback || 'Bitte Daten manuell prüfen', 'warning');
-          }
-        }
-
-        setPdfProcessing(false);
-        setOcrProgress(null);
-      };
-      reader.readAsDataURL(file);
+      if (combined.length === 0) {
+        setSearchError('Keine Regatten gefunden. Versuche einen anderen Suchbegriff.');
+      }
     } catch (err) {
-      console.error('PDF Processing Error:', err);
-      addToast('Fehler beim Verarbeiten der PDF', 'error');
-      setPdfProcessing(false);
+      console.error('Search error:', err);
+      setSearchError('Suche fehlgeschlagen: ' + err.message);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [existingRegattas]);
+
+  // Debounced version
+  const debouncedSearch = useMemo(
+    () => debounce(performSearch, 500),
+    [performSearch]
+  );
+
+  // Suche bei Query-Änderung
+  useEffect(() => {
+    debouncedSearch(searchQuery, selectedYear);
+  }, [searchQuery, selectedYear, debouncedSearch]);
+
+  // Regatta auswählen und Details laden
+  const selectRegatta = async (regatta) => {
+    setSelectedRegatta(regatta);
+    setShowDropdown(false);
+    setSearchQuery(regatta.name || regatta.regattaName);
+
+    // Wenn URL vorhanden → Details via Gemini extrahieren
+    if (regatta.url && regatta.source === 'gemini') {
+      setIsExtracting(true);
+      setSailorFound(null);
+
+      try {
+        const details = await extractRegattaDetails(regatta.url, boatData.segelnummer);
+
+        // Auto-Fill
+        if (details.regattaName) setRegattaName(details.regattaName);
+        if (details.date) setDate(details.date);
+        if (details.totalParticipants) setTotalParticipants(details.totalParticipants.toString());
+        if (details.raceCount) setRaceCount(details.raceCount.toString());
+
+        // Segler-Ergebnis
+        if (details.sailorResult?.found) {
+          setPlacement(details.sailorResult.placement?.toString() || '');
+          setSailorFound(details.sailorResult);
+          addToast(`Deine Platzierung gefunden: Platz ${details.sailorResult.placement}!`, 'success');
+        } else {
+          setSailorFound({ found: false });
+          addToast('Regatta geladen. Bitte Platzierung manuell eingeben.', 'warning');
+        }
+      } catch (err) {
+        console.error('Extraction error:', err);
+        addToast('Fehler beim Laden der Details. Bitte manuell ausfüllen.', 'error');
+        // Fallback: Basisdaten aus Suchergebnis
+        setRegattaName(regatta.name || '');
+        if (regatta.date) setDate(regatta.date);
+      } finally {
+        setIsExtracting(false);
+      }
+    } else {
+      // Lokale Regatta → Daten direkt übernehmen
+      setRegattaName(regatta.name || regatta.regattaName || '');
+      if (regatta.date || regatta.regattaDate) {
+        const d = regatta.date || regatta.regattaDate;
+        setDate(typeof d === 'string' ? d : d?.toISOString?.()?.split('T')[0] || '');
+      }
+      if (regatta.placement) setPlacement(regatta.placement.toString());
+      if (regatta.totalParticipants) setTotalParticipants(regatta.totalParticipants.toString());
+      addToast('Regatta aus lokaler Datenbank geladen', 'success');
     }
   };
 
+  // Rechnung verarbeiten
   const processInvoice = async (file) => {
     setInvoiceProcessing(true);
 
@@ -134,7 +171,9 @@ export function AddRegattaPage({ setCurrentPage }) {
         const amount = await parseInvoicePDF(base64, setOcrProgress);
         if (amount) {
           setInvoiceAmount(amount.toFixed(2).replace('.', ','));
-          addToast('Betrag erkannt: ' + amount.toFixed(2) + ' €', 'success');
+          addToast(`Betrag erkannt: ${amount.toFixed(2)} €`, 'success');
+        } else {
+          addToast('Betrag konnte nicht erkannt werden. Bitte manuell eingeben.', 'warning');
         }
 
         setInvoiceProcessing(false);
@@ -143,70 +182,35 @@ export function AddRegattaPage({ setCurrentPage }) {
       reader.readAsDataURL(file);
     } catch (err) {
       console.error('Invoice Processing Error:', err);
+      addToast('Fehler beim Verarbeiten der Rechnung', 'error');
       setInvoiceProcessing(false);
     }
   };
 
-  const searchManage2Sail = async () => {
-    if (!m2sQuery.trim()) return;
+  const handleInvoiceDrop = async (e) => {
+    e.preventDefault();
+    setIsDraggingInvoice(false);
 
-    setM2sSearching(true);
-    setM2sError(null);
-    setM2sResults([]);
+    const file = e.dataTransfer?.files[0] || e.target?.files[0];
+    if (!file) return;
 
-    try {
-      const year = new Date().getFullYear();
-      const response = await fetch(`/api/search-regatta?query=${encodeURIComponent(m2sQuery)}&year=${year}`);
-      const data = await response.json();
-
-      if (data.success && data.results?.length > 0) {
-        setM2sResults(data.results);
-      } else {
-        setM2sError('Keine Regatten gefunden. Tipp: Kopiere den Link direkt von manage2sail.com');
-      }
-    } catch (err) {
-      setM2sError('Fehler bei der Suche: ' + err.message);
-    } finally {
-      setM2sSearching(false);
+    if (!file.type.includes('pdf') && !file.type.includes('image')) {
+      addToast('Bitte eine PDF- oder Bild-Datei auswählen', 'error');
+      return;
     }
+
+    await processInvoice(file);
   };
 
-  const loadRegattaDetails = async (regatta) => {
-    setM2sSearching(true);
-
-    try {
-      const sailParam = boatData.segelnummer
-        ? `&sailNumber=${encodeURIComponent(boatData.segelnummer)}`
-        : '';
-
-      const response = await fetch(`/api/get-regatta?slug=${encodeURIComponent(regatta.slug)}${sailParam}`);
-      const data = await response.json();
-
-      if (data.success) {
-        if (data.event?.name) setRegattaName(data.event.name);
-        if (data.event?.date) setDate(data.event.date);
-        if (data.participant?.rank) setPlacement(data.participant.rank.toString());
-        if (data.participant?.totalInClass) setTotalParticipants(data.participant.totalInClass.toString());
-        else if (data.totalParticipants) setTotalParticipants(data.totalParticipants.toString());
-        if (data.participant?.raceCount || data.classes?.[0]?.raceCount) {
-          setRaceCount((data.participant?.raceCount || data.classes[0].raceCount).toString());
-        }
-
-        addToast('Regatta-Daten geladen!', 'success');
-        setStep(maxCrew > 1 ? 1 : 2);
-      } else {
-        setM2sError(data.error || 'Fehler beim Laden');
-      }
-    } catch (err) {
-      setM2sError('Fehler: ' + err.message);
-    } finally {
-      setM2sSearching(false);
-    }
-  };
-
+  // Speichern
   const handleSave = () => {
     if (!regattaName) {
       addToast('Bitte Regatta-Name eingeben', 'error');
+      return;
+    }
+
+    if (!currentInvoiceData) {
+      addToast('Bitte Rechnung hochladen (erforderlich für Erstattung)', 'error');
       return;
     }
 
@@ -224,17 +228,18 @@ export function AddRegattaPage({ setCurrentPage }) {
       raceCount: parseInt(raceCount) || null,
       invoiceAmount: amount,
       crew: selectedCrew,
-      source: addMode,
+      source: 'manage2sail-search',
+      manage2sailUrl: selectedRegatta?.url || null,
     };
 
     const savedRegatta = addRegatta(newRegatta);
 
-    // Save PDF attachments
-    if (currentPdfData || currentInvoiceData) {
+    // PDF-Anhang speichern
+    if (currentInvoiceData) {
       addPdfAttachment({
         regattaId: savedRegatta.id,
         regattaName,
-        resultPdf: currentPdfData,
+        resultPdf: null,
         invoicePdf: currentInvoiceData,
       });
     }
@@ -262,7 +267,7 @@ export function AddRegattaPage({ setCurrentPage }) {
           Regatta hinzufügen
         </h1>
         <p className={isDark ? 'text-cream/60' : 'text-light-muted'}>
-          Lade dein Ergebnis hoch oder suche auf manage2sail
+          Suche deine Regatta auf manage2sail - wir füllen alles automatisch aus
         </p>
       </div>
 
@@ -289,116 +294,153 @@ export function AddRegattaPage({ setCurrentPage }) {
         ))}
       </div>
 
-      {/* Step 0: Ergebnis */}
+      {/* Step 0: Regatta suchen */}
       {step === 0 && (
         <GlassCard>
-          {/* Mode Switcher */}
-          <div className={`flex gap-1 p-1 rounded-lg mb-6 ${isDark ? 'bg-navy-800/50' : 'bg-light-border/50'}`}>
-            {[
-              { id: 'upload', label: 'PDF Upload', icon: Icons.upload },
-              { id: 'search', label: 'manage2sail', icon: Icons.search },
-              { id: 'manual', label: 'Manuell', icon: Icons.edit },
-            ].map(mode => (
-              <button
-                key={mode.id}
-                onClick={() => setAddMode(mode.id)}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm transition-all ${
-                  addMode === mode.id
-                    ? isDark ? 'bg-navy-700 text-cream' : 'bg-white text-light-text shadow-sm'
-                    : isDark ? 'text-cream/50 hover:text-cream' : 'text-light-muted hover:text-light-text'
-                }`}
-              >
-                <span className="w-4 h-4">{mode.icon}</span>
-                <span className="hidden sm:inline">{mode.label}</span>
-              </button>
-            ))}
+          {/* Jahr-Auswahl */}
+          <div className="mb-4">
+            <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+              Jahr
+            </label>
+            <select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+              className={`w-32 px-3 py-2 rounded-lg border ${
+                isDark
+                  ? 'bg-navy-800 border-navy-700 text-cream'
+                  : 'bg-white border-light-border text-light-text'
+              }`}
+            >
+              {years.map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
           </div>
 
-          {/* Upload Mode */}
-          {addMode === 'upload' && (
-            <div>
-              <div
-                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={(e) => handleFileDrop(e, false)}
-                onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
-                  isDragging
-                    ? isDark ? 'border-gold-400 bg-gold-400/10' : 'border-teal-500 bg-teal-500/10'
-                    : isDark ? 'border-navy-700 hover:border-gold-400/50' : 'border-light-border hover:border-teal-500/50'
+          {/* Suchfeld */}
+          <div className="relative mb-4">
+            <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+              Regatta suchen
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => searchResults.length > 0 && setShowDropdown(true)}
+                placeholder="z.B. Rahnsdorfer Optipokal, IDM ILCA..."
+                className={`w-full px-4 py-3 pr-12 rounded-lg border ${
+                  isDark
+                    ? 'bg-navy-800 border-navy-700 text-cream placeholder:text-cream/30'
+                    : 'bg-white border-light-border text-light-text'
                 }`}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  className="hidden"
-                  onChange={(e) => handleFileDrop(e, false)}
-                />
-                <div className={`w-12 h-12 mx-auto mb-4 rounded-xl flex items-center justify-center ${
-                  isDark ? 'bg-gold-400/10 text-gold-400' : 'bg-teal-500/10 text-teal-500'
-                }`}>
-                  {pdfProcessing ? Icons.refresh : Icons.upload}
-                </div>
-                <p className={isDark ? 'text-cream' : 'text-light-text'}>
-                  {pdfProcessing
-                    ? ocrProgress?.status || 'Verarbeite PDF...'
-                    : 'Ergebnis-PDF hier ablegen oder klicken'}
-                </p>
+              />
+              <div className={`absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 ${
+                isSearching ? 'animate-spin' : ''
+              } ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+                {isSearching ? Icons.refresh : Icons.search}
               </div>
             </div>
-          )}
 
-          {/* Search Mode */}
-          {addMode === 'search' && (
-            <div className="space-y-4">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={m2sQuery}
-                  onChange={(e) => setM2sQuery(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && searchManage2Sail()}
-                  placeholder="Regatta-Name oder manage2sail-Link"
-                  className={`flex-1 px-4 py-2 rounded-lg border ${
-                    isDark
-                      ? 'bg-navy-800 border-navy-700 text-cream placeholder:text-cream/30'
-                      : 'bg-white border-light-border text-light-text'
-                  }`}
-                />
-                <Button onClick={searchManage2Sail} disabled={m2sSearching}>
-                  {m2sSearching ? 'Suche...' : 'Suchen'}
-                </Button>
-              </div>
-
-              {m2sError && (
-                <p className="text-coral text-sm">{m2sError}</p>
-              )}
-
-              {m2sResults.length > 0 && (
-                <div className="space-y-2">
-                  {m2sResults.map((r, i) => (
+            {/* Suchergebnisse Dropdown */}
+            {showDropdown && (searchResults.length > 0 || searchError) && (
+              <div className={`absolute z-50 w-full mt-1 rounded-lg border shadow-xl max-h-64 overflow-y-auto ${
+                isDark ? 'bg-navy-800 border-navy-700' : 'bg-white border-light-border'
+              }`}>
+                {searchError && searchResults.length === 0 ? (
+                  <div className={`p-4 text-sm ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+                    {searchError}
+                  </div>
+                ) : (
+                  searchResults.map((result, idx) => (
                     <button
-                      key={i}
-                      onClick={() => loadRegattaDetails(r)}
-                      className={`w-full text-left p-3 rounded-lg transition-all ${
-                        isDark ? 'bg-navy-800/50 hover:bg-navy-800' : 'bg-light-border/30 hover:bg-light-border'
+                      key={idx}
+                      onClick={() => selectRegatta(result)}
+                      className={`w-full text-left p-3 border-b last:border-b-0 transition-colors ${
+                        isDark
+                          ? 'border-navy-700 hover:bg-navy-700/50'
+                          : 'border-light-border hover:bg-light-border/30'
                       }`}
                     >
-                      <p className={`font-medium ${isDark ? 'text-cream' : 'text-light-text'}`}>
-                        {r.name}
-                      </p>
-                      <p className={`text-sm ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
-                        {r.year}
-                      </p>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className={`font-medium truncate ${isDark ? 'text-cream' : 'text-light-text'}`}>
+                            {result.name || result.regattaName}
+                          </p>
+                          <p className={`text-sm ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+                            {result.date && new Date(result.date).toLocaleDateString('de-DE')}
+                            {result.location && ` • ${result.location}`}
+                          </p>
+                        </div>
+                        <span className={`flex-shrink-0 text-xs px-2 py-0.5 rounded-full ${
+                          result.confidence === 'high'
+                            ? 'bg-success/20 text-success'
+                            : result.confidence === 'medium'
+                              ? isDark ? 'bg-gold-400/20 text-gold-400' : 'bg-amber-100 text-amber-700'
+                              : isDark ? 'bg-navy-700 text-cream/50' : 'bg-gray-100 text-gray-500'
+                        }`}>
+                          {result.source === 'local' ? 'Lokal' :
+                           result.confidence === 'high' ? 'Exakt' :
+                           result.confidence === 'medium' ? 'Ähnlich' : 'Möglich'}
+                        </span>
+                      </div>
                     </button>
-                  ))}
+                  ))
+                )}
+                {isSearching && (
+                  <div className={`p-3 text-sm text-center ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+                    <span className="inline-block w-4 h-4 mr-2 animate-spin">{Icons.refresh}</span>
+                    Suche auf manage2sail.com...
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Lade-Anzeige bei Extraktion */}
+          {isExtracting && (
+            <div className={`p-4 rounded-lg mb-4 flex items-center gap-3 ${
+              isDark ? 'bg-navy-800/50' : 'bg-light-border/30'
+            }`}>
+              <span className="w-5 h-5 animate-spin">{Icons.refresh}</span>
+              <span className={isDark ? 'text-cream' : 'text-light-text'}>
+                Lade Regatta-Details und suche deine Platzierung...
+              </span>
+            </div>
+          )}
+
+          {/* Segler gefunden Anzeige */}
+          {sailorFound && (
+            <div className={`p-4 rounded-lg mb-4 ${
+              sailorFound.found
+                ? 'bg-success/10 border border-success/30'
+                : isDark ? 'bg-navy-800/50' : 'bg-amber-50 border border-amber-200'
+            }`}>
+              {sailorFound.found ? (
+                <div className="flex items-center gap-2">
+                  <span className="w-5 h-5 text-success">{Icons.check}</span>
+                  <div>
+                    <p className={`font-medium ${isDark ? 'text-cream' : 'text-light-text'}`}>
+                      Deine Platzierung wurde gefunden!
+                    </p>
+                    <p className={`text-sm ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
+                      {sailorFound.name} ({sailorFound.sailNumber}) - Platz {sailorFound.placement}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className={`w-5 h-5 ${isDark ? 'text-gold-400' : 'text-amber-500'}`}>{Icons.warning}</span>
+                  <p className={isDark ? 'text-cream' : 'text-light-text'}>
+                    Segelnummer nicht gefunden. Bitte Platzierung manuell eingeben.
+                  </p>
                 </div>
               )}
             </div>
           )}
 
-          {/* Form Fields */}
-          <div className="mt-6 space-y-4">
+          {/* Formular-Felder */}
+          <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
@@ -482,7 +524,7 @@ export function AddRegattaPage({ setCurrentPage }) {
           </div>
 
           <div className="flex justify-end mt-6">
-            <Button onClick={() => setStep(1)} disabled={!regattaName}>
+            <Button onClick={() => setStep(maxCrew > 1 ? 1 : 2)} disabled={!regattaName || isExtracting}>
               Weiter
             </Button>
           </div>
@@ -537,39 +579,56 @@ export function AddRegattaPage({ setCurrentPage }) {
       {/* Step 2: Rechnung (Step 1 bei Einpersonenbooten) */}
       {(step === 2 || (step === 1 && maxCrew <= 1)) && (
         <GlassCard>
-          <h3 className={`text-lg font-semibold mb-4 ${isDark ? 'text-cream' : 'text-light-text'}`}>
-            Rechnung
+          <h3 className={`text-lg font-semibold mb-2 ${isDark ? 'text-cream' : 'text-light-text'}`}>
+            Rechnung hochladen
           </h3>
+          <p className={`text-sm mb-4 ${isDark ? 'text-cream/60' : 'text-light-muted'}`}>
+            Die Rechnung ist als Nachweis für die Erstattung erforderlich.
+          </p>
 
           <div
             onDragOver={(e) => { e.preventDefault(); setIsDraggingInvoice(true); }}
             onDragLeave={() => setIsDraggingInvoice(false)}
-            onDrop={(e) => handleFileDrop(e, true)}
+            onDrop={handleInvoiceDrop}
             onClick={() => invoiceInputRef.current?.click()}
             className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all mb-4 ${
               isDraggingInvoice
                 ? isDark ? 'border-gold-400 bg-gold-400/10' : 'border-teal-500 bg-teal-500/10'
-                : isDark ? 'border-navy-700 hover:border-gold-400/50' : 'border-light-border hover:border-teal-500/50'
+                : currentInvoiceData
+                  ? 'border-success bg-success/10'
+                  : isDark ? 'border-navy-700 hover:border-gold-400/50' : 'border-light-border hover:border-teal-500/50'
             }`}
           >
             <input
               ref={invoiceInputRef}
               type="file"
-              accept=".pdf"
+              accept=".pdf,image/*"
               className="hidden"
-              onChange={(e) => handleFileDrop(e, true)}
+              onChange={handleInvoiceDrop}
             />
             <div className={`w-12 h-12 mx-auto mb-4 rounded-xl flex items-center justify-center ${
-              isDark ? 'bg-gold-400/10 text-gold-400' : 'bg-teal-500/10 text-teal-500'
+              currentInvoiceData
+                ? 'bg-success/20 text-success'
+                : isDark ? 'bg-gold-400/10 text-gold-400' : 'bg-teal-500/10 text-teal-500'
             }`}>
-              {invoiceProcessing ? Icons.refresh : Icons.receipt}
+              {invoiceProcessing ? Icons.refresh : currentInvoiceData ? Icons.check : Icons.receipt}
             </div>
             <p className={isDark ? 'text-cream' : 'text-light-text'}>
               {invoiceProcessing
                 ? ocrProgress?.status || 'Verarbeite Rechnung...'
-                : 'Rechnung hier ablegen oder klicken'}
+                : currentInvoiceData
+                  ? 'Rechnung hochgeladen ✓'
+                  : 'Rechnung hier ablegen oder klicken'}
             </p>
           </div>
+
+          {currentInvoiceData && (
+            <div className={`p-3 rounded-lg mb-4 ${isDark ? 'bg-success/10' : 'bg-green-50'}`}>
+              <p className={`text-sm ${isDark ? 'text-success' : 'text-green-700'}`}>
+                PDF hochgeladen. Betrag wird im Feld unten angezeigt.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className={`block text-sm mb-1 ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
@@ -586,13 +645,16 @@ export function AddRegattaPage({ setCurrentPage }) {
                   : 'bg-white border-light-border text-light-text'
               }`}
             />
+            <p className={`text-xs mt-1 ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+              Der Betrag wurde automatisch erkannt. Du kannst ihn manuell korrigieren.
+            </p>
           </div>
 
           <div className="flex justify-between mt-6">
             <Button variant="secondary" onClick={() => setStep(maxCrew > 1 ? 1 : 0)}>
               Zurück
             </Button>
-            <Button onClick={handleSave}>
+            <Button onClick={handleSave} disabled={!currentInvoiceData}>
               Speichern
             </Button>
           </div>

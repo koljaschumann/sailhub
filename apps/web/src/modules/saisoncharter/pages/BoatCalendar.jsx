@@ -133,7 +133,7 @@ export function BoatCalendarPage({ setCurrentPage }) {
                         <div className={`mt-2 pt-2 border-t text-xs ${
                           isDark ? 'border-navy-700 text-cream/50' : 'border-light-border text-light-muted'
                         }`}>
-                          Gechartert von: {booking.sailor_first_name} {booking.sailor_last_name}
+                          Gechartert von: {booking.sailor_name}
                         </div>
                       )}
                     </div>

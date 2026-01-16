@@ -325,9 +325,232 @@ export function formatForDatabase(parsed, sailorResult, sailorId) {
   };
 }
 
+/**
+ * ============================================================================
+ * NEUE FUNKTIONEN FÜR INTELLIGENTE REGATTA-SUCHE
+ * ============================================================================
+ */
+
+const SEARCH_PROMPT = `Du bist ein Experte für Segel-Regatten in Deutschland.
+
+AUFGABE: Finde Regatten auf manage2sail.com die zum Suchbegriff passen.
+
+SUCHBEGRIFF: "{query}"
+JAHR: {year}
+
+FUZZY-MATCHING: Auch ähnliche Namen finden! Beispiele:
+- "rahnsdorfer opti-pokal" → "Rahnsdorfer Optipokal"
+- "IDM ILCA" → "IDM ILCA 4", "IDM ILCA 6", "IDM ILCA 7"
+- "travemünder woche" → "Travemünder Woche"
+
+Suche auf manage2sail.com nach Regatten mit diesem Namen im Jahr {year}.
+
+WICHTIG:
+- Nur Regatten zurückgeben die WIRKLICH auf manage2sail.com existieren
+- URLs müssen das Format https://manage2sail.com/de-DE/event/... haben
+- Wenn du dir nicht sicher bist, gib "confidence": "low" an
+
+AUSGABE als JSON-Array (NUR JSON, keine Markdown, keine Erklärungen):
+[
+  {
+    "name": "Vollständiger Regatta-Name",
+    "url": "https://manage2sail.com/de-DE/event/...",
+    "date": "YYYY-MM-DD",
+    "location": "Austragungsort",
+    "confidence": "high|medium|low"
+  }
+]
+
+Wenn KEINE Treffer gefunden werden → leeres Array: []`;
+
+const EXTRACT_DETAILS_PROMPT = `Du bist ein Experte für Segel-Regatta-Ergebnisse.
+
+AUFGABE: Extrahiere ALLE verfügbaren Daten von dieser Regatta-Seite.
+
+REGATTA-URL: {url}
+SEGELNUMMER DES NUTZERS: {sailNumber}
+
+FINDE auf manage2sail.com:
+1. Vollständiger Regatta-Name
+2. Datum (im Format YYYY-MM-DD)
+3. Austragungsort
+4. Bootsklasse(n)
+5. Anzahl Teilnehmer in der relevanten Klasse
+6. Anzahl Wettfahrten
+7. Platzierung des Seglers mit Segelnummer "{sailNumber}"
+
+WICHTIG:
+- Suche nach der Segelnummer in den Ergebnislisten
+- Die Segelnummer kann Varianten haben: "GER 12345", "GER12345", "12345"
+- Falls mehrere Klassen existieren, wähle die passende zur Segelnummer
+
+AUSGABE als JSON (NUR JSON, keine Markdown):
+{
+  "regattaName": "string",
+  "date": "YYYY-MM-DD",
+  "location": "string",
+  "boatClass": "string oder null",
+  "totalParticipants": number oder null,
+  "raceCount": number oder null,
+  "sailorResult": {
+    "found": true/false,
+    "placement": number oder null,
+    "points": number oder null,
+    "sailNumber": "gefundene Segelnummer",
+    "name": "Name des Seglers"
+  }
+}`;
+
+/**
+ * Sucht Regatten auf manage2sail.com mit Fuzzy-Matching
+ * @param {string} query - Suchbegriff (Regatta-Name)
+ * @param {number} year - Jahr für Filter
+ * @returns {Promise<Array<{name, url, date, location, confidence}>>}
+ */
+export async function searchManage2SailRegattas(query, year) {
+  if (!query || query.length < 3) {
+    return [];
+  }
+
+  if (!GEMINI_API_KEY) {
+    console.warn('VITE_GEMINI_API_KEY not set, cannot search manage2sail');
+    return [];
+  }
+
+  const prompt = SEARCH_PROMPT
+    .replace('{query}', query)
+    .replace(/{year}/g, year.toString());
+
+  try {
+    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: prompt }]
+        }],
+        tools: [{
+          googleSearch: {}
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 4096
+        }
+      })
+    });
+
+    if (!response.ok) {
+      console.error('Gemini search failed:', await response.text());
+      return [];
+    }
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!text) {
+      return [];
+    }
+
+    const cleaned = cleanJsonResponse(text);
+    const results = JSON.parse(cleaned);
+
+    // Validiere und formatiere Ergebnisse
+    return (Array.isArray(results) ? results : [])
+      .filter(r => r.name && r.url)
+      .map(r => ({
+        name: r.name,
+        url: r.url,
+        date: r.date || null,
+        location: r.location || '',
+        confidence: r.confidence || 'medium',
+        source: 'gemini'
+      }));
+
+  } catch (error) {
+    console.error('Regatta search error:', error);
+    return [];
+  }
+}
+
+/**
+ * Extrahiert detaillierte Regatta-Informationen inkl. Segler-Platzierung
+ * @param {string} url - manage2sail Event-URL
+ * @param {string} sailNumber - Segelnummer des Nutzers
+ * @returns {Promise<{regattaName, date, location, totalParticipants, raceCount, sailorResult}>}
+ */
+export async function extractRegattaDetails(url, sailNumber) {
+  if (!url || !url.includes('manage2sail.com')) {
+    throw new Error('Ungültige manage2sail URL');
+  }
+
+  if (!GEMINI_API_KEY) {
+    throw new Error('VITE_GEMINI_API_KEY nicht konfiguriert');
+  }
+
+  const prompt = EXTRACT_DETAILS_PROMPT
+    .replace('{url}', url)
+    .replace(/{sailNumber}/g, sailNumber || 'NICHT ANGEGEBEN');
+
+  try {
+    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: prompt }]
+        }],
+        tools: [{
+          googleSearch: {}
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 8192
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Gemini extraction failed:', errorText);
+      throw new Error('Gemini API Fehler');
+    }
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!text) {
+      throw new Error('Leere Antwort von Gemini');
+    }
+
+    const cleaned = cleanJsonResponse(text);
+    const result = JSON.parse(cleaned);
+
+    return {
+      regattaName: result.regattaName || null,
+      date: result.date || null,
+      location: result.location || null,
+      boatClass: result.boatClass || null,
+      totalParticipants: result.totalParticipants || null,
+      raceCount: result.raceCount || null,
+      sailorResult: result.sailorResult || { found: false },
+      manage2sailUrl: url
+    };
+
+  } catch (error) {
+    console.error('Detail extraction error:', error);
+    throw error;
+  }
+}
+
 export default {
   scrapeManage2Sail,
   parseRegattaResults,
   findSailorResult,
-  formatForDatabase
+  formatForDatabase,
+  searchManage2SailRegattas,
+  extractRegattaDetails
 };

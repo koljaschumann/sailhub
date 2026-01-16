@@ -46,6 +46,18 @@ const AWARD_CATEGORIES = [
   { id: 'most_championships', label: 'Meisterschafts-Teilnehmer:in', description: 'Meiste Meisterschafts-Teilnahmen' },
 ];
 
+// Filter types for Admin statistics
+const FILTER_TYPES = [
+  { id: 'most_regattas', label: 'Meiste Regatten', icon: 'trophy' },
+  { id: 'best_avg_placement', label: 'Beste Durchschnittsplatzierung', icon: 'medal' },
+  { id: 'furthest_regatta', label: 'Weiteste Regatta', icon: 'mapPin' },
+  { id: 'youngest_participant', label: 'Jüngster Teilnehmer', icon: 'user' },
+  { id: 'most_races', label: 'Meiste Wettfahrten', icon: 'sailboat' },
+  { id: 'best_single_placement', label: 'Beste Einzelplatzierung', icon: 'star' },
+  { id: 'most_active_boat_class', label: 'Aktivste Bootsklasse', icon: 'chart' },
+  { id: 'most_championships', label: 'Meisterschafts-Champion', icon: 'award' },
+];
+
 /**
  * Calculate distance between two points using Haversine formula
  */
@@ -77,6 +89,7 @@ async function geocodeLocation(location) {
 export function DataProvider({ children }) {
   const [registrations, setRegistrations] = useState([]);
   const [awards, setAwards] = useState([]);
+  const [sailors, setSailors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -190,6 +203,16 @@ export function DataProvider({ children }) {
         console.warn('Awards error:', awardsError);
       }
       setAwards(awardsData || []);
+
+      // Sailors laden (für Geburtsdatum)
+      const { data: sailorsData, error: sailorsError } = await supabase
+        .from('sailors')
+        .select('id, name, birth_date, boat_class');
+
+      if (sailorsError && sailorsError.code !== 'PGRST116') {
+        console.warn('Sailors error:', sailorsError);
+      }
+      setSailors(sailorsData || []);
 
     } catch (err) {
       console.error('Error loading data:', err);
@@ -396,20 +419,216 @@ export function DataProvider({ children }) {
     return awards.filter(a => a.year === year);
   };
 
+  // =============================================
+  // Extended Statistics for Admin
+  // =============================================
+
+  /**
+   * Get detailed statistics with all filter options
+   */
+  const getDetailedStats = async (year) => {
+    const yearRegistrations = registrations.filter(r => r.year === year);
+    const stats = await calculateYearlyStats(year);
+
+    // Top by regattas
+    const topByRegattas = [...stats]
+      .filter(s => s.regatta_count > 0)
+      .sort((a, b) => b.regatta_count - a.regatta_count)
+      .slice(0, 10);
+
+    // Calculate average placement for each sailor
+    const sailorPlacements = new Map();
+    yearRegistrations
+      .filter(r => r.placement && r.total_participants)
+      .forEach(r => {
+        if (!sailorPlacements.has(r.sailor_id)) {
+          sailorPlacements.set(r.sailor_id, {
+            sailor_id: r.sailor_id,
+            first_name: r.first_name,
+            last_name: r.last_name,
+            placements: [],
+            relativePlacements: [],
+          });
+        }
+        const sailor = sailorPlacements.get(r.sailor_id);
+        sailor.placements.push(r.placement);
+        sailor.relativePlacements.push(r.placement / r.total_participants);
+      });
+
+    // Top by average placement (relative to field size)
+    const topByAvgPlacement = [...sailorPlacements.values()]
+      .map(s => ({
+        ...s,
+        avgPlacement: s.placements.reduce((a, b) => a + b, 0) / s.placements.length,
+        avgRelativePlacement: s.relativePlacements.reduce((a, b) => a + b, 0) / s.relativePlacements.length,
+        regattaCount: s.placements.length,
+      }))
+      .filter(s => s.regattaCount >= 3) // Minimum 3 regattas for fair comparison
+      .sort((a, b) => a.avgRelativePlacement - b.avgRelativePlacement)
+      .slice(0, 10);
+
+    // Best single placements
+    const bestSinglePlacements = yearRegistrations
+      .filter(r => r.placement && r.total_participants)
+      .map(r => ({
+        sailor_id: r.sailor_id,
+        first_name: r.first_name,
+        last_name: r.last_name,
+        regatta_name: r.event_name,
+        placement: r.placement,
+        total_participants: r.total_participants,
+        relativePlacement: r.placement / r.total_participants,
+      }))
+      .sort((a, b) => a.placement - b.placement || a.relativePlacement - b.relativePlacement)
+      .slice(0, 10);
+
+    // Most races (Wettfahrten)
+    const sailorRaces = new Map();
+    yearRegistrations
+      .filter(r => r.race_count)
+      .forEach(r => {
+        if (!sailorRaces.has(r.sailor_id)) {
+          sailorRaces.set(r.sailor_id, {
+            sailor_id: r.sailor_id,
+            first_name: r.first_name,
+            last_name: r.last_name,
+            totalRaces: 0,
+            regattaCount: 0,
+          });
+        }
+        const sailor = sailorRaces.get(r.sailor_id);
+        sailor.totalRaces += r.race_count;
+        sailor.regattaCount += 1;
+      });
+
+    const topByRaceCount = [...sailorRaces.values()]
+      .sort((a, b) => b.totalRaces - a.totalRaces)
+      .slice(0, 10);
+
+    // Youngest participants (requires birth_date from sailors table)
+    const youngestParticipants = [];
+    const participatingSailorIds = [...new Set(yearRegistrations.map(r => r.sailor_id))];
+
+    for (const sailorId of participatingSailorIds) {
+      const sailor = sailors.find(s => s.id === sailorId);
+      if (sailor?.birth_date) {
+        const reg = yearRegistrations.find(r => r.sailor_id === sailorId);
+        const birthDate = new Date(sailor.birth_date);
+        const ageAtYearEnd = year - birthDate.getFullYear();
+
+        youngestParticipants.push({
+          sailor_id: sailorId,
+          first_name: reg?.first_name || sailor.name?.split(' ')[0] || '',
+          last_name: reg?.last_name || sailor.name?.split(' ').slice(1).join(' ') || '',
+          birth_date: sailor.birth_date,
+          age: ageAtYearEnd,
+          regattaCount: yearRegistrations.filter(r => r.sailor_id === sailorId).length,
+        });
+      }
+    }
+
+    youngestParticipants.sort((a, b) => new Date(b.birth_date) - new Date(a.birth_date));
+    const topYoungest = youngestParticipants.slice(0, 10);
+
+    // Boat class statistics
+    const boatClassStats = {};
+    yearRegistrations.forEach(r => {
+      if (r.boat_class) {
+        if (!boatClassStats[r.boat_class]) {
+          boatClassStats[r.boat_class] = {
+            name: r.boat_class,
+            participations: 0,
+            uniqueSailors: new Set(),
+            regattas: new Set(),
+          };
+        }
+        boatClassStats[r.boat_class].participations += 1;
+        boatClassStats[r.boat_class].uniqueSailors.add(r.sailor_id);
+        boatClassStats[r.boat_class].regattas.add(r.event_name);
+      }
+    });
+
+    const mostActiveBoatClasses = Object.values(boatClassStats)
+      .map(bc => ({
+        name: bc.name,
+        participations: bc.participations,
+        uniqueSailors: bc.uniqueSailors.size,
+        uniqueRegattas: bc.regattas.size,
+      }))
+      .sort((a, b) => b.participations - a.participations)
+      .slice(0, 10);
+
+    // Top by distance
+    const topByDistance = [...stats]
+      .filter(s => s.total_distance_km > 0)
+      .sort((a, b) => b.total_distance_km - a.total_distance_km)
+      .slice(0, 10);
+
+    // Top by championships
+    const topByChampionships = [...stats]
+      .filter(s => s.championships_attended > 0)
+      .sort((a, b) => b.championships_attended - a.championships_attended)
+      .slice(0, 10);
+
+    return {
+      sailors: stats,
+      topByRegattas,
+      topByAvgPlacement,
+      topByDistance,
+      youngestParticipants: topYoungest,
+      topByRaceCount,
+      bestSinglePlacements,
+      boatClassStats: mostActiveBoatClasses,
+      topByChampionships,
+    };
+  };
+
+  /**
+   * Get ranking by specific filter type
+   */
+  const getRankingByFilter = async (year, filterType) => {
+    const detailedStats = await getDetailedStats(year);
+
+    switch (filterType) {
+      case 'most_regattas':
+        return detailedStats.topByRegattas;
+      case 'best_avg_placement':
+        return detailedStats.topByAvgPlacement;
+      case 'furthest_regatta':
+        return detailedStats.topByDistance;
+      case 'youngest_participant':
+        return detailedStats.youngestParticipants;
+      case 'most_races':
+        return detailedStats.topByRaceCount;
+      case 'best_single_placement':
+        return detailedStats.bestSinglePlacements;
+      case 'most_active_boat_class':
+        return detailedStats.boatClassStats;
+      case 'most_championships':
+        return detailedStats.topByChampionships;
+      default:
+        return detailedStats.sailors;
+    }
+  };
+
   const value = {
     registrations,
     awards,
+    sailors,
     loading,
     error,
     selectedYear,
     setSelectedYear,
     awardCategories: AWARD_CATEGORIES,
+    filterTypes: FILTER_TYPES,
     clubLocation,
     getAvailableYears,
     calculateYearlyStats,
     getYearlySummary,
     calculateAwards,
     getAwards,
+    getDetailedStats,
+    getRankingByFilter,
     geocodeLocation,
     calculateDistance,
     reload: loadData,

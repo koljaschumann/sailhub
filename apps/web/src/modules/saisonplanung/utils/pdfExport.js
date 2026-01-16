@@ -159,10 +159,13 @@ export function exportSeasonCalendar(events, season) {
   doc.setFont('helvetica', 'normal');
   doc.text(season.name, pageWidth / 2, 22, { align: 'center' });
 
-  // Legende
+  // Legende - nur Bootsklassen mit Einträgen anzeigen
+  const usedBoatClassIds = [...new Set(events.map(e => e.boatClassId))];
+  const usedBoatClasses = boatClasses.filter(bc => usedBoatClassIds.includes(bc.id));
+
   doc.setFontSize(8);
   let legendX = 14;
-  boatClasses.forEach((bc) => {
+  usedBoatClasses.forEach((bc) => {
     const color = hexToRgb(bc.color);
     doc.setFillColor(color.r, color.g, color.b);
     doc.rect(legendX, 28, 4, 4, 'F');
@@ -329,13 +332,17 @@ export function exportByBoatClass(events, season) {
   doc.setFont('helvetica', 'normal');
   doc.text(season.name, pageWidth / 2, 90, { align: 'center' });
 
+  // Nur Bootsklassen mit Einträgen anzeigen
+  const usedBoatClassIds = [...new Set(events.map(e => e.boatClassId))];
+  const usedBoatClasses = boatClasses.filter(bc => usedBoatClassIds.includes(bc.id));
+
   // Übersicht auf Titelseite
   doc.setFontSize(11);
   let summaryY = 120;
   doc.text('Übersicht:', 14, summaryY);
   summaryY += 10;
 
-  boatClasses.forEach((bc) => {
+  usedBoatClasses.forEach((bc) => {
     const count = events.filter(e => e.boatClassId === bc.id).length;
     const regattas = events.filter(e => e.boatClassId === bc.id && e.type === 'regatta').length;
     const camps = events.filter(e => e.boatClassId === bc.id && e.type === 'trainingslager').length;
@@ -350,8 +357,8 @@ export function exportByBoatClass(events, season) {
   doc.setFontSize(9);
   doc.text(`Erstellt am: ${formatDate(new Date().toISOString())}`, pageWidth / 2, pageHeight - 20, { align: 'center' });
 
-  // Für jede Bootsklasse eine Seite
-  boatClasses.forEach((bc) => {
+  // Für jede Bootsklasse mit Einträgen eine Seite
+  usedBoatClasses.forEach((bc) => {
     const classEvents = events.filter(e => e.boatClassId === bc.id)
       .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
 
@@ -443,11 +450,6 @@ export function exportByBoatClass(events, season) {
         doc.text(`${name}: ${count}x`, 20, mbY);
         mbY += 6;
       });
-    } else {
-      doc.setFontSize(11);
-      doc.setTextColor(128, 128, 128);
-      doc.text('Keine Veranstaltungen für diese Bootsklasse geplant.', pageWidth / 2, 60, { align: 'center' });
-      doc.setTextColor(0, 0, 0);
     }
   });
 

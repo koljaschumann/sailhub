@@ -111,7 +111,7 @@ export function ReportListPage({ setCurrentPage }) {
                 <IconBadge
                   icon={
                     report.equipment?.type?.name === 'motorboot'
-                      ? Icons.boat
+                      ? Icons.motorboat
                       : report.equipment?.type?.name === 'haenger'
                         ? Icons.truck
                         : Icons.sailboat

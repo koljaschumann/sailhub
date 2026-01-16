@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTheme, FeedbackWidget, DonateButton } from '@tsc/ui';
 import { DataProvider } from './context/DataContext';
 import { Navigation } from './components/Navigation';
@@ -27,7 +28,9 @@ function LoadingScreen() {
 
 // Main App Content
 function SaisoncharterContent({ onBackToDashboard }) {
-  const [currentPage, setCurrentPage] = useState('booking');
+  const [searchParams] = useSearchParams();
+  const initialPage = searchParams.get('page') || 'booking';
+  const [currentPage, setCurrentPage] = useState(initialPage);
   const { isDark } = useTheme();
 
   const renderPage = () => {

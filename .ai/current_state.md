@@ -1,18 +1,73 @@
 # SailHub – AI Context & Handover State
 
-> **Letzte Aktualisierung:** 14. Januar 2026, 23:00 Uhr
-> **Übergabe von:** Claude Code (Opus)
+> **Letzte Aktualisierung:** 16. Januar 2026, 10:30 Uhr
+> **Übergabe von:** Claude Code (Opus 4.5)
 > **Übergabe an:** Nächste Session
-> **Meilenstein:** v1.0-stable (alle Kernfunktionen laufen)
+> **Meilenstein:** v1.3 - Security Fix + manage2sail Auto-Suche (in Arbeit)
 
 ---
 
-## Aktueller Status: MEILENSTEIN ERREICHT
+## Aktueller Status: SECURITY FIX ABGESCHLOSSEN
 
-**Alle 8 Module funktionieren, Bugs sind behoben, System ist stabil.**
+**Alle 8 Module funktionieren. GitHub Security Alert behoben.**
 
 ```
-HEUTE (14.01.2026) ERLEDIGT:
+HEUTE (16.01.2026) ERLEDIGT:
+✅ SECURITY: GitHub Alert - Google API Key aus Repository entfernt
+   - Hardcoded API Key aus scripts/veo/generate-header.js entfernt
+   - Git-History bereinigt (filter-branch)
+   - Force-Push zu GitHub durchgeführt
+   - GitHub Security Alert als "revoked" geschlossen
+   - Remote-URL bereinigt (exponiertes Token entfernt)
+   - Script verwendet jetzt nur noch Umgebungsvariable VEO_API_KEY
+
+GESTERN (15.01.2026) - IN ARBEIT:
+🔄 Startgelderstattung: Intelligente manage2sail Auto-Suche
+   - UI implementiert und deployed
+   - Suche liefert noch keine Ergebnisse (Debugging nötig)
+   - Dateien:
+     • apps/web/src/modules/startgelder/pages/AddRegatta.jsx (komplett neu)
+     • apps/web/src/modules/startgelder/utils/fuzzySearch.js (NEU)
+     • packages/supabase/src/manage2sail.js (erweitert)
+   - Features:
+     • Jahr-Auswahl (aktuelles + 2 Vorjahre)
+     • Debounced Suche (500ms)
+     • Fuzzy-Matching via Fuse.js
+     • Gemini + Google Search für manage2sail-Suche
+     • Auto-Fill bei Regatta-Auswahl
+     • Platzierungserkennung nach Segelnummer
+
+15.01.2026 ERLEDIGT:
+✅ Saisonplanung: Auto-Sync Enddatum auf Startdatum
+✅ Saisonplanung: PDF-Legende nur mit genutzten Bootsklassen
+✅ Saisonplanung: Motorboot-Bereich nur für Admin sichtbar
+✅ Landing Page: Saisonplanung/Jahresauswertung für alle sichtbar
+✅ Landing Page: Modul-Beschreibungen aktualisiert
+✅ Schadensmeldung: Neues Motorboot-Icon erstellt
+✅ Schadensmeldung: Übersicht nur für Admin/Trainer sichtbar
+✅ Schadensmeldung: Hängerwart-Rolle (is_haengerwart) implementiert
+✅ Schadensmeldung: Verwaltung nur für Admin/Hängerwart zugänglich
+✅ Schadensmeldung: E-Mail-Benachrichtigung vorbereitet (Edge Function TODO)
+
+NACHMITTAG (15.01.2026) ERLEDIGT:
+✅ DB-Migration: is_haengerwart Feld für profiles Tabelle (007_add_haengerwart.sql)
+✅ DB-Migration auf Produktion ausgeführt
+✅ Jahresauswertung Admin: Vollständig implementiert mit 8 Filtern:
+   - Meiste Regatten
+   - Beste Durchschnittsplatzierung
+   - Weiteste Regatta (Distanz)
+   - Jüngster Teilnehmer
+   - Meiste Wettfahrten
+   - Beste Einzelplatzierung
+   - Aktivste Bootsklasse
+   - Meisterschafts-Champion
+✅ Edge Function: send-damage-notification erstellt (Resend API)
+✅ Edge Function: send-damage-confirmation erstellt (Bestätigung an Melder)
+✅ Beide Edge Functions deployed auf Supabase (ACTIVE)
+✅ RESEND_API_KEY Secret in Supabase konfiguriert
+✅ DataContext erweitert: getDetailedStats(), getRankingByFilter(), sailors-Daten
+
+GESTERN (14.01.2026) ERLEDIGT:
 ✅ GitHub Repo "sailhub" erstellt mit Labels
 ✅ GitHub-Integration funktioniert (Feedback → Issues)
 ✅ ClickUp-Integration repariert (SailHub Space)
@@ -92,6 +147,16 @@ cp -r /tmp/sailhub-build2/packages/data/src "G:/Geteilte Ablagen/Sailhub/Sailiin
 | ClickUp Tasks | Space: 90158816299, List: 901518789734 | Token in .env |
 | Gemini AI | Ticket-Kategorisierung | API Key in .env |
 | Supabase | Self-hosted: supabase.aitema.de | Anon Key in .env |
+| **Resend** | E-Mail-Versand (Schadensmeldung) | Secret in Supabase |
+
+### Edge Functions (Supabase)
+
+| Function | Zweck | Status |
+|----------|-------|--------|
+| `send-damage-notification` | Benachrichtigung an Sportwart/Hängerwart | ✅ ACTIVE |
+| `send-damage-confirmation` | Bestätigung an den Melder | ✅ ACTIVE |
+
+**Secret:** `RESEND_API_KEY` in Supabase Edge Functions konfiguriert
 
 ---
 
@@ -143,13 +208,32 @@ export SSH_ASKPASS=/tmp/askpass.sh && export SSH_ASKPASS_REQUIRE=force
 ## Nächste Schritte (Prio)
 
 ### Hoch
-- [ ] Account-Löschung in Profil-Einstellungen einbauen (UI)
-- [ ] Weitere Module testen und Bugs fixen
+- [ ] **manage2sail Auto-Suche debuggen:** Suche liefert keine Ergebnisse
+  - Problem: Gemini API mit Google Search grounding liefert keine/leere Antworten
+  - Debugging-Schritte:
+    1. Browser Console öffnen während Suche
+    2. Prüfen ob `searchManage2SailRegattas()` aufgerufen wird
+    3. Prüfen ob Gemini API Response korrekt ist
+    4. Eventuell Prompt anpassen oder Fallback einbauen
+  - Relevante Dateien:
+    - `packages/supabase/src/manage2sail.js` - `searchManage2SailRegattas()`
+    - `apps/web/src/modules/startgelder/pages/AddRegatta.jsx` - `performSearch()`
+- [ ] **Schadensmeldung E-Mail:** E-Mail-Adresse des Sportwarts eintragen
+  - Datei: `apps/web/src/modules/schadensmeldung/context/DataContext.jsx`
+  - Variable: `NOTIFICATION_EMAILS.sportwart`
+- [ ] **Schadensmeldung E-Mail:** E-Mail-Adresse des Hängerwarts eintragen
+  - Datei: `apps/web/src/modules/schadensmeldung/context/DataContext.jsx`
+  - Variable: `NOTIFICATION_EMAILS.haengerwart`
+
+### Erledigt (15.01.2026)
+- [x] ~~**RESEND_API_KEY als Supabase Secret setzen**~~ ✅
+- [x] ~~**Edge Function deployen:** `send-damage-notification`~~ ✅
+- [x] ~~**Edge Function deployen:** `send-damage-confirmation`~~ ✅
+- [x] ~~**DB-Migration ausführen:** `007_add_haengerwart.sql`~~ ✅
 
 ### Mittel
-- [ ] Startgelder Admin – Verwaltungsbereich mit Funktionen
-- [ ] Jahresauswertung Admin – Verwaltungsbereich mit Funktionen
 - [ ] RLS wieder aktivieren für profiles Tabelle
+- [ ] Weitere Module testen und Bugs fixen
 
 ### Niedrig
 - [ ] Debug-Logs entfernen in useAuth.jsx

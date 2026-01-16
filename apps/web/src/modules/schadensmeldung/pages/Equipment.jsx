@@ -94,7 +94,7 @@ export function EquipmentPage({ setCurrentPage }) {
           >
             <span className="w-5 h-5">
               {type.name === 'segelboot' && Icons.sailboat}
-              {type.name === 'motorboot' && Icons.boat}
+              {type.name === 'motorboot' && Icons.motorboat}
               {type.name === 'haenger' && Icons.truck}
             </span>
             <span className="font-medium">{type.display_name}</span>

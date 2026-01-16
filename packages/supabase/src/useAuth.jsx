@@ -362,6 +362,9 @@ export function AuthProvider({ children }) {
   // Debug: Log role detection
   console.log('useAuth Context - userRole:', userRole, 'profile?.role:', profile?.role, 'isAdmin:', userRole === 'admin', 'isTrainer:', userRole === 'trainer' || userRole === 'admin');
 
+  // Modulspezifische Berechtigungen aus dem Profil
+  const isHaengerwart = profile?.is_haengerwart === true;
+
   const value = {
     user,
     profile,
@@ -379,6 +382,8 @@ export function AuthProvider({ children }) {
     isTrainer: userRole === 'trainer' || userRole === 'admin',
     isParent: userRole === 'eltern',
     isSailor: userRole === 'segler',
+    isHaengerwart,  // Modulspezifisch: Kann Schadensmeldungen bearbeiten
+    canManageDamages: userRole === 'admin' || isHaengerwart,  // Admin oder Hängerwart
     userRole,
     trainerBoatClasses: profile?.trainer_boat_classes?.map(t => t.boat_class_id) || [],
   };

@@ -27,17 +27,18 @@ export default function Landing() {
     {
       id: 'saisonplanung',
       title: 'Saisonplanung',
-      description: 'Plane die Regatten und Trainingslager deiner Trainingsgruppen.',
+      description: 'Plane als Trainer oder Sportwart die Regatten und Trainingslager deiner Trainingsgruppen.',
       icon: Icons.sailboat,
       color: 'amber',
       href: '/saisonplanung',
       features: ['Regatta-Kalender', 'Motorboot-Zuteilung', 'Trainingslager', 'PDF-Export'],
-      trainerOnly: true
+      trainerOnly: true,
+      showOnLanding: true  // Immer auf Landing Page anzeigen
     },
     {
       id: 'startgelder',
       title: 'Startgeld-Erstattung',
-      description: 'Erfasse Regatta-Teilnahmen automatisch über manage2sail und erstelle Erstattungsanträge.',
+      description: 'Erfasse deine Regatta-Teilnahmen über manage2sail und erstelle Erstattungsanträge.',
       icon: Icons.euro,
       color: 'mint',
       href: '/startgelder',
@@ -55,7 +56,7 @@ export default function Landing() {
     {
       id: 'eventanmeldung',
       title: 'Eventanmeldung',
-      description: 'Melde dich für Regatten und Trainings an. Verwalte Crew für Mehrpersonenboote.',
+      description: 'Melde dich für Regatten und Trainingslager vereinsintern an. Verwalte Crew für Mehrpersonenboote.',
       icon: Icons.calendar,
       color: 'purple',
       href: '/eventanmeldung',
@@ -64,7 +65,7 @@ export default function Landing() {
     {
       id: 'saisoncharter',
       title: 'Saison-Charter',
-      description: 'Chartere ein Vereinsboot für die gesamte Saison. 250€ Pauschale April-September.',
+      description: 'Chartere ein Vereinsboot für längere Zeiträume.',
       icon: Icons.anchor,
       color: 'cyan',
       href: '/saisoncharter',
@@ -82,7 +83,7 @@ export default function Landing() {
     {
       id: 'spendenportal',
       title: 'Spendenportal',
-      description: 'Unterstütze die TSC-Jugend mit einer Spende für die Nachwuchsförderung.',
+      description: 'Unterstütze die Jugendabteilung mit einer Spende für die Nachwuchsförderung.',
       icon: Icons.heart,
       color: 'red',
       href: '/spendenportal',
@@ -91,17 +92,21 @@ export default function Landing() {
     {
       id: 'jahresauswertung',
       title: 'Jahresauswertung',
-      description: 'Statistiken der Jugendarbeit. Ranglisten, Kilometer und Jahresauszeichnungen.',
+      description: 'Statistiken der Saison, Bestenauswertung, Jahresauszeichnungen.',
       icon: Icons.trophy,
       color: 'amber',
       href: '/jahresauswertung',
       features: ['Ranglisten', 'Distanz-Berechnung', 'Jahres-Awards', 'Statistiken'],
-      adminOnly: true
+      adminOnly: true,
+      showOnLanding: true  // Immer auf Landing Page anzeigen
     }
   ];
 
   // Filter modules based on user role
+  // Auf der Landing Page: Module mit showOnLanding werden immer angezeigt
   const visibleModules = modules.filter(module => {
+    // Module mit showOnLanding immer anzeigen
+    if (module.showOnLanding) return true;
     if (module.adminOnly && !isAdmin) return false;
     if (module.trainerOnly && !isTrainer) return false;  // isTrainer ist true für Trainer UND Admin
     return true;

@@ -167,7 +167,7 @@ ${fullDescription}`;
                       : isDark ? 'text-cream/60' : 'text-light-muted'
                   }`}>
                     {type.name === 'segelboot' && Icons.sailboat}
-                    {type.name === 'motorboot' && Icons.boat}
+                    {type.name === 'motorboot' && Icons.motorboat}
                     {type.name === 'haenger' && Icons.truck}
                   </div>
                   <span className={`text-sm font-medium ${

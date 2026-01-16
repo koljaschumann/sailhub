@@ -6,7 +6,21 @@
       "Bash(curl:*)",
       "Bash(grep:*)",
       "Bash(xcopy:*)",
-      "Bash(pnpm build:*)"
+      "Bash(pnpm build:*)",
+      "Bash(claude:*)",
+      "Bash(pnpm install:*)",
+      "Bash(tar:*)",
+      "Bash(scp:*)",
+      "Bash(chmod:*)",
+      "Bash(export SSH_ASKPASS=/tmp/askpass.sh)",
+      "Bash(export SSH_ASKPASS_REQUIRE=force)",
+      "Bash(ls:*)",
+      "mcp__plugin_supabase_supabase__list_tables",
+      "Bash(DISPLAY=dummy SSH_ASKPASS=/tmp/askpass.sh SSH_ASKPASS_REQUIRE=force ssh -o StrictHostKeyChecking=no root@49.13.15.44 \"docker cp /tmp/sailhub-dist.tar.gz sailhub:/tmp/ && docker exec sailhub sh -c ''rm -rf /usr/share/nginx/html/* && tar -xzf /tmp/sailhub-dist.tar.gz -C /usr/share/nginx/html/''\")",
+      "mcp__plugin_supabase_supabase__list_projects",
+      "mcp__plugin_supabase_supabase__apply_migration",
+      "mcp__plugin_supabase_supabase__execute_sql",
+      "mcp__plugin_supabase_supabase__deploy_edge_function"
     ]
   }
 }

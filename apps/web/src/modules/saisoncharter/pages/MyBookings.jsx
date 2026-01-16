@@ -3,15 +3,21 @@ import { useTheme, GlassCard, Button, Icons, IconBadge, Modal, useToast } from '
 import { useData } from '../context/DataContext';
 
 const STATUS_LABELS = {
-  ausstehend: 'Zahlung ausstehend',
-  bezahlt: 'Bezahlt',
-  storniert: 'Storniert',
+  beantragt: 'Beantragt',
+  genehmigt: 'Genehmigt',
+  boot_zugewiesen: 'Boot zugewiesen',
+  aktiv: 'Aktiv',
+  beendet: 'Beendet',
+  abgelehnt: 'Abgelehnt',
 };
 
 const STATUS_COLORS = {
-  ausstehend: 'gold',
-  bezahlt: 'emerald',
-  storniert: 'red',
+  beantragt: 'gold',
+  genehmigt: 'blue',
+  boot_zugewiesen: 'cyan',
+  aktiv: 'emerald',
+  beendet: 'slate',
+  abgelehnt: 'red',
 };
 
 export function MyBookingsPage({ setCurrentPage }) {
@@ -82,18 +88,22 @@ export function MyBookingsPage({ setCurrentPage }) {
                       {booking.boat?.name || 'Boot'}
                     </h3>
                     <span className={`px-2 py-0.5 rounded-full text-xs border ${
-                      booking.status === 'ausstehend'
+                      booking.status === 'beantragt'
                         ? 'bg-gold-400/20 text-gold-400 border-gold-400/30'
-                        : booking.status === 'bezahlt'
-                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                          : 'bg-red-500/20 text-red-400 border-red-500/30'
+                        : booking.status === 'genehmigt' || booking.status === 'boot_zugewiesen'
+                          ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                          : booking.status === 'aktiv'
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                            : booking.status === 'abgelehnt'
+                              ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                              : 'bg-slate-500/20 text-slate-400 border-slate-500/30'
                     }`}>
-                      {STATUS_LABELS[booking.status]}
+                      {STATUS_LABELS[booking.status] || booking.status}
                     </span>
                   </div>
 
                   <p className={`text-sm ${isDark ? 'text-cream/70' : 'text-light-muted'}`}>
-                    {booking.sailor_first_name} {booking.sailor_last_name}
+                    {booking.sailor_name}
                     {booking.boat?.sail_number && ` • ${booking.boat.sail_number}`}
                   </p>
 
