@@ -536,43 +536,480 @@ function decodeHTMLEntities(text) {
   return result;
 }
 
-const EXTRACT_DETAILS_PROMPT = `Du bist ein Experte für Segel-Regatta-Ergebnisse.
+/**
+ * ============================================================================
+ * DIREKTES EVENT-SCRAPING (Alternative zu Gemini)
+ * Findet automatisch die richtige Bootsklasse anhand der Segelnummer
+ * ============================================================================
+ */
 
-AUFGABE: Extrahiere ALLE verfügbaren Daten von dieser Regatta-Seite.
+/**
+ * Normalisiert Segelnummer für Vergleich
+ * "GER 12345" → "ger12345", "GER12345" → "ger12345"
+ */
+function normalizeSailNumber(sailNumber) {
+  if (!sailNumber) return '';
+  return sailNumber.toLowerCase().replace(/[\s\-]+/g, '');
+}
 
-REGATTA-URL: {url}
-SEGELNUMMER DES NUTZERS: {sailNumber}
+/**
+ * Lädt eine Event-Seite via Firecrawl mit verbesserter SPA-Unterstützung
+ *
+ * WICHTIG: manage2sail ist eine Angular-SPA
+ * - Hash-Routen (#!/results) werden client-seitig gehandhabt
+ * - Firecrawl muss lange genug warten für vollständiges Rendering
+ * - Wir entfernen den Hash-Teil aus der URL für Firecrawl
+ */
+async function scrapeEventPage(url, options = {}) {
+  const baseUrl = FIRECRAWL_URL.replace(/\/+$/, '');
 
-FINDE auf manage2sail.com:
-1. Vollständiger Regatta-Name
-2. Datum (im Format YYYY-MM-DD)
-3. Austragungsort
-4. Bootsklasse(n)
-5. Anzahl Teilnehmer in der relevanten Klasse
-6. Anzahl Wettfahrten
-7. Platzierung des Seglers mit Segelnummer "{sailNumber}"
+  // Entferne Hash-Teil aus URL (Firecrawl kann das nicht verarbeiten)
+  const cleanUrl = url.split('#')[0];
 
-WICHTIG:
-- Suche nach der Segelnummer in den Ergebnislisten
-- Die Segelnummer kann Varianten haben: "GER 12345", "GER12345", "12345"
-- Falls mehrere Klassen existieren, wähle die passende zur Segelnummer
+  const waitTime = options.waitFor || 8000; // Längere Wartezeit für SPA
 
-AUSGABE als JSON (NUR JSON, keine Markdown):
-{
-  "regattaName": "string",
-  "date": "YYYY-MM-DD",
-  "location": "string",
-  "boatClass": "string oder null",
-  "totalParticipants": number oder null,
-  "raceCount": number oder null,
-  "sailorResult": {
-    "found": true/false,
-    "placement": number oder null,
-    "points": number oder null,
-    "sailNumber": "gefundene Segelnummer",
-    "name": "Name des Seglers"
+  console.log('[manage2sail] Scraping Event-Seite:', cleanUrl, '(wait:', waitTime, 'ms)');
+
+  try {
+    const response = await fetch(`${baseUrl}/v1/scrape`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: cleanUrl,
+        formats: ['rawHtml'],  // WICHTIG: Nur rawHtml, nicht 'html'!
+        waitFor: waitTime,
+        timeout: 45000
+        // KEINE actions - wird von Firecrawl nicht unterstützt
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[manage2sail] Firecrawl response:', errorText.substring(0, 200));
+      throw new Error(`Firecrawl HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const html = data.data?.rawHtml || '';
+
+    if (!data.success || !html || html.length < 500) {
+      console.warn('[manage2sail] Firecrawl returned empty/short HTML:', html.length, 'chars');
+      throw new Error('Firecrawl returned empty HTML - SPA not rendered');
+    }
+
+    console.log('[manage2sail] Firecrawl erfolgreich:', html.length, 'chars');
+    return html;
+  } catch (error) {
+    console.error('[manage2sail] scrapeEventPage Fehler:', error.message);
+    throw error;
   }
-}`;
+}
+
+/**
+ * Extrahiert Metadaten (Name, Datum) aus Event-HTML
+ */
+function parseEventMetadata(html) {
+  let regattaName = null;
+  let date = null;
+
+  // Name aus <title> - manage2sail Format: "Regattaname manage2sail"
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (titleMatch) {
+    let title = decodeHTMLEntities(titleMatch[1]);
+    // Entferne " manage2sail" Suffix
+    title = title.replace(/\s*manage2sail\s*$/i, '').trim();
+    // Entferne " - manage2sail" Format
+    title = title.split(' - ')[0].trim();
+    if (title && title.length > 3) {
+      regattaName = title;
+    }
+  }
+
+  // Datum (DD.MM.YYYY - DD.MM.YYYY oder einzeln)
+  // Suche nach Datumsbereich zuerst
+  const dateRangeMatch = html.match(/(\d{2})\.(\d{2})\.(\d{4})\s*[-–]\s*(\d{2})\.(\d{2})\.(\d{4})/);
+  if (dateRangeMatch) {
+    // Nehme das Startdatum
+    date = `${dateRangeMatch[3]}-${dateRangeMatch[2]}-${dateRangeMatch[1]}`;
+  } else {
+    // Einzelnes Datum
+    const dateMatch = html.match(/(\d{2})\.(\d{2})\.(\d{4})/) || html.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (dateMatch) {
+      if (dateMatch[0].includes('.')) {
+        date = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+      } else {
+        date = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+      }
+    }
+  }
+
+  return { regattaName, date };
+}
+
+/**
+ * Versucht eingebettete Klassenliste aus Angular-App zu extrahieren
+ * manage2sail speichert manchmal Klassen-IDs in data-Attributen oder JavaScript-Objekten
+ */
+function extractEmbeddedClassData(html) {
+  const classes = [];
+
+  // Methode 1: Suche nach class/regatta IDs in URLs
+  // Format: classId=UUID oder regattaId=UUID
+  const classIdRegex = /classId[=:][\s"']*([a-f0-9-]{36})/gi;
+  let match;
+  const seenIds = new Set();
+
+  while ((match = classIdRegex.exec(html)) !== null) {
+    const classId = match[1];
+    if (!seenIds.has(classId)) {
+      seenIds.add(classId);
+      classes.push({ id: classId, name: null });
+    }
+  }
+
+  // Methode 2: Suche nach Klassennamen in der Nähe von select/option Elementen
+  const optionRegex = /<option[^>]*value="(\d+)"[^>]*>([^<]+)<\/option>/gi;
+  while ((match = optionRegex.exec(html)) !== null) {
+    const name = decodeHTMLEntities(match[2].trim());
+    // Typische Klassennamen: Optimist A, ILCA 4, 29er, etc.
+    if (name && /\b(Optimist|ILCA|Laser|29er|420|470|Europe|Finn|OK-Jolle)\b/i.test(name)) {
+      classes.push({ id: match[1], name });
+    }
+  }
+
+  // Methode 3: Suche nach JSON-artigen Strukturen mit Regatta-Daten
+  const jsonMatch = html.match(/\{"classes":\s*\[(.*?)\]/);
+  if (jsonMatch) {
+    try {
+      const classArray = JSON.parse(`[${jsonMatch[1]}]`);
+      classArray.forEach(c => {
+        if (c.id && c.name) {
+          classes.push({ id: c.id, name: c.name });
+        }
+      });
+    } catch (e) {
+      // JSON-Parsing fehlgeschlagen, ignorieren
+    }
+  }
+
+  return classes;
+}
+
+/**
+ * Findet alle Bootsklassen-Links auf der Event-Seite
+ */
+function findClassResultsLinks(html, baseUrl) {
+  const classes = [];
+  const seenUrls = new Set();
+
+  // Pattern: Links zu /results/ mit Klassennamen
+  const resultsLinkRegex = /<a[^>]*href="([^"]*\/results\/[^"]*)"[^>]*>([^<]+)<\/a>/gi;
+  let match;
+
+  while ((match = resultsLinkRegex.exec(html)) !== null) {
+    const href = match[1];
+    const name = decodeHTMLEntities(match[2].trim());
+
+    if (!name || name.length < 2 || seenUrls.has(href)) continue;
+    if (name.toLowerCase().includes('all') || name.toLowerCase().includes('overall')) continue;
+
+    seenUrls.add(href);
+
+    let resultsUrl = href;
+    if (href.startsWith('/')) {
+      resultsUrl = `${MANAGE2SAIL_BASE}${href}`;
+    }
+
+    classes.push({ name, resultsUrl });
+  }
+
+  console.log('[manage2sail] Gefundene Klassen:', classes.map(c => c.name));
+  return classes;
+}
+
+/**
+ * Parst Ergebnistabelle und sucht nach Segelnummer
+ */
+function parseResultsAndFindSailor(html, sailNumber) {
+  const normalizedSearch = normalizeSailNumber(sailNumber);
+  const numberOnly = normalizedSearch.replace(/[a-z]/g, '');
+
+  let raceCount = 0;
+  const results = [];
+
+  // Wettfahrten zählen (R1, R2, R3...)
+  const raceMatches = html.match(/\bR(\d+)\b/gi) || [];
+  raceMatches.forEach(r => {
+    const num = parseInt(r.replace(/\D/g, ''));
+    if (num > raceCount && num < 20) raceCount = num;
+  });
+
+  // Ergebniszeilen parsen (HTML-Tabellen)
+  const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+
+  let trMatch;
+  while ((trMatch = trRegex.exec(html)) !== null) {
+    const rowContent = trMatch[1];
+    const cells = [];
+    let tdMatch;
+
+    while ((tdMatch = tdRegex.exec(rowContent)) !== null) {
+      const cellText = tdMatch[1].replace(/<[^>]+>/g, '').trim();
+      cells.push(decodeHTMLEntities(cellText));
+    }
+    tdRegex.lastIndex = 0;
+
+    if (cells.length >= 3) {
+      const placement = parseInt(cells[0]);
+      const sailNumRegex = /([A-Z]{2,3})[\s\-]?(\d{2,6})/i;
+
+      let foundSailNumber = null;
+      let name = null;
+
+      for (let i = 1; i < Math.min(cells.length, 5); i++) {
+        const sailMatch = cells[i].match(sailNumRegex);
+        if (sailMatch && !foundSailNumber) {
+          foundSailNumber = `${sailMatch[1].toUpperCase()} ${sailMatch[2]}`;
+        } else if (cells[i] && cells[i].length > 2 && !name && !cells[i].match(/^\d+$/)) {
+          name = cells[i];
+        }
+      }
+
+      if (!isNaN(placement) && placement > 0 && placement < 500 && foundSailNumber) {
+        results.push({ placement, sailNumber: foundSailNumber, name: name || '' });
+      }
+    }
+  }
+
+  // Segler suchen
+  let sailorResult = null;
+  for (const result of results) {
+    const normalizedResult = normalizeSailNumber(result.sailNumber);
+    const resultNumberOnly = normalizedResult.replace(/[a-z]/g, '');
+
+    if (normalizedResult === normalizedSearch ||
+        (numberOnly && resultNumberOnly === numberOnly)) {
+      sailorResult = result;
+      break;
+    }
+  }
+
+  return {
+    raceCount,
+    totalParticipants: results.length,
+    sailorResult
+  };
+}
+
+/**
+ * Sucht nach Segelnummer direkt im HTML-Text (Fallback wenn Tabellen-Parsing fehlschlägt)
+ * Findet auch Segelnummern in unstrukturierten Formaten
+ */
+function searchSailNumberInText(html, sailNumber) {
+  const normalizedSearch = normalizeSailNumber(sailNumber);
+  const numberOnly = normalizedSearch.replace(/[a-z]/g, '');
+
+  if (!numberOnly || numberOnly.length < 3) return null;
+
+  // Suche nach allen Vorkommen von GER + Nummer in der Nähe
+  const patterns = [
+    new RegExp(`GER\\s*${numberOnly}\\b`, 'gi'),
+    new RegExp(`\\b${numberOnly}\\b`, 'g')
+  ];
+
+  for (const pattern of patterns) {
+    if (pattern.test(html)) {
+      // Gefunden! Versuche Kontext zu extrahieren
+      const match = html.match(new RegExp(`.{0,200}GER\\s*${numberOnly}.{0,200}`, 'i'));
+      if (match) {
+        const context = match[0];
+
+        // Versuche Platzierung aus Kontext zu extrahieren
+        // Typische Muster: "2." oder ">2<" oder "Platz 2"
+        const placementMatch = context.match(/(?:^|\D)(\d{1,3})(?:\.|<|\s|$)/);
+        const placement = placementMatch ? parseInt(placementMatch[1]) : null;
+
+        // Versuche Namen zu extrahieren (typisch: Vorname NACHNAME oder NACHNAME, Vorname)
+        const nameMatch = context.match(/([A-ZÄÖÜ][a-zäöüß]+)\s+([A-ZÄÖÜ]{2,})|([A-ZÄÖÜ]{2,})[,\s]+([A-ZÄÖÜ][a-zäöüß]+)/);
+        let name = null;
+        if (nameMatch) {
+          if (nameMatch[1] && nameMatch[2]) {
+            name = `${nameMatch[1]} ${nameMatch[2]}`;
+          } else if (nameMatch[3] && nameMatch[4]) {
+            name = `${nameMatch[4]} ${nameMatch[3]}`;
+          }
+        }
+
+        return {
+          found: true,
+          sailNumber: `GER ${numberOnly}`,
+          placement: placement && placement > 0 && placement < 500 ? placement : null,
+          name: name
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extrahiert Event-Details und findet automatisch die richtige Bootsklasse
+ * anhand der Segelnummer
+ *
+ * HYBRID-ANSATZ:
+ * 1. Firecrawl für Metadaten (Name, Datum) - funktioniert zuverlässig
+ * 2. Textsuche nach Segelnummer im HTML
+ * 3. Parsing von Tabellen wenn vorhanden
+ * 4. Fallback: Gemini für fehlende Daten
+ */
+export async function extractEventDetails(url, sailNumber) {
+  if (!url || !url.includes('manage2sail.com')) {
+    throw new Error('Ungültige manage2sail URL');
+  }
+
+  console.log('[manage2sail] extractEventDetails:', url, 'Segelnummer:', sailNumber);
+
+  let metadata = { regattaName: null, date: null };
+  let sailorResult = { found: false };
+  let raceCount = null;
+  let totalParticipants = null;
+  let boatClass = null;
+
+  try {
+    // 1. Event-Seite laden (mit längerer Wartezeit für SPA)
+    const html = await scrapeEventPage(url, { waitFor: 10000 });
+    metadata = parseEventMetadata(html);
+
+    console.log('[manage2sail] Metadata extrahiert:', metadata);
+
+    // 2. Schnelle Textsuche nach Segelnummer
+    const textSearchResult = searchSailNumberInText(html, sailNumber);
+    if (textSearchResult?.found) {
+      console.log('[manage2sail] Segelnummer per Textsuche gefunden:', textSearchResult);
+      sailorResult = textSearchResult;
+    }
+
+    // 3. Versuche eingebettete Klassendaten zu extrahieren
+    const embeddedClasses = extractEmbeddedClassData(html);
+    if (embeddedClasses.length > 0) {
+      console.log('[manage2sail] Eingebettete Klassen gefunden:', embeddedClasses.length);
+    }
+
+    // 4. Alle Bootsklassen-Links finden und durchsuchen
+    const classLinks = findClassResultsLinks(html, url);
+
+    if (classLinks.length === 0) {
+      // Keine Klassen-Links, versuche direkt auf der Seite
+      console.log('[manage2sail] Keine Klassen-Links, parse Hauptseite');
+      const parsed = parseResultsAndFindSailor(html, sailNumber);
+
+      if (parsed.sailorResult) {
+        sailorResult = {
+          found: true,
+          placement: parsed.sailorResult.placement,
+          name: parsed.sailorResult.name,
+          sailNumber: parsed.sailorResult.sailNumber
+        };
+      }
+      raceCount = parsed.raceCount || null;
+      totalParticipants = parsed.totalParticipants || null;
+
+    } else {
+      // Durchsuche jede Klasse
+      for (const classInfo of classLinks) {
+        console.log('[manage2sail] Durchsuche Klasse:', classInfo.name);
+
+        try {
+          const classHtml = await scrapeEventPage(classInfo.resultsUrl, { waitFor: 8000 });
+
+          // Erst Textsuche
+          const classTextResult = searchSailNumberInText(classHtml, sailNumber);
+          if (classTextResult?.found) {
+            console.log('[manage2sail] Segelnummer per Textsuche in Klasse gefunden:', classInfo.name);
+            sailorResult = classTextResult;
+            boatClass = classInfo.name;
+
+            // Versuche noch Tabellen zu parsen für bessere Daten
+            const parsed = parseResultsAndFindSailor(classHtml, sailNumber);
+            if (parsed.sailorResult) {
+              sailorResult = {
+                found: true,
+                placement: parsed.sailorResult.placement,
+                name: parsed.sailorResult.name,
+                sailNumber: parsed.sailorResult.sailNumber
+              };
+            }
+            raceCount = parsed.raceCount || raceCount;
+            totalParticipants = parsed.totalParticipants || totalParticipants;
+            break;
+          }
+
+          // Dann Tabellen-Parsing
+          const parsed = parseResultsAndFindSailor(classHtml, sailNumber);
+          if (parsed.sailorResult) {
+            console.log('[manage2sail] Segelnummer per Tabelle gefunden in:', classInfo.name);
+            sailorResult = {
+              found: true,
+              placement: parsed.sailorResult.placement,
+              name: parsed.sailorResult.name,
+              sailNumber: parsed.sailorResult.sailNumber
+            };
+            boatClass = classInfo.name;
+            raceCount = parsed.raceCount || null;
+            totalParticipants = parsed.totalParticipants || null;
+            break;
+          }
+        } catch (err) {
+          console.warn('[manage2sail] Fehler bei Klasse', classInfo.name, ':', err.message);
+        }
+      }
+    }
+
+    // 5. Ergebnis zusammenstellen
+    return {
+      ...metadata,
+      boatClass,
+      raceCount,
+      totalParticipants,
+      sailorResult,
+      manage2sailUrl: url
+    };
+
+  } catch (error) {
+    console.error('[manage2sail] extractEventDetails Fehler:', error.message);
+
+    // Auch bei Fehler: Gib zumindest die Metadaten zurück, die wir haben
+    return {
+      ...metadata,
+      boatClass: null,
+      raceCount: null,
+      totalParticipants: null,
+      sailorResult: { found: false },
+      manage2sailUrl: url,
+      error: error.message
+    };
+  }
+}
+
+const EXTRACT_DETAILS_PROMPT = `Suche im Internet nach den Ergebnissen dieser Segelregatta:
+
+Regatta-URL: {url}
+Segelnummer zum Suchen: {sailNumber}
+
+AUFGABEN:
+1. Finde die Ergebnisliste dieser Regatta auf manage2sail.com
+2. Suche die Segelnummer {sailNumber} (auch als GER{sailNumber} oder GER {sailNumber})
+3. Extrahiere: Teilnehmerzahl, Anzahl Wettfahrten, Platzierung
+
+Gib das Ergebnis als JSON zurück:
+{"regattaName":"Regattaname","date":"2025-05-24","totalParticipants":45,"raceCount":6,"sailorResult":{"found":true,"placement":2,"name":"Max Mustermann","sailNumber":"GER 13162"}}
+
+Falls die Segelnummer nicht gefunden wird:
+{"regattaName":"Regattaname","date":"2025-05-24","totalParticipants":45,"raceCount":6,"sailorResult":{"found":false}}
+
+WICHTIG: Antworte NUR mit dem JSON-Objekt.`;
 
 /**
  * Generiert Suchvarianten aus dem Eingabetext
@@ -755,7 +1192,7 @@ export async function extractRegattaDetails(url, sailNumber) {
         }],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 8192
+          maxOutputTokens: 4096
         }
       })
     });
@@ -773,8 +1210,23 @@ export async function extractRegattaDetails(url, sailNumber) {
       throw new Error('Leere Antwort von Gemini');
     }
 
+    console.log('[manage2sail] Gemini raw response:', text.substring(0, 200));
+
     const cleaned = cleanJsonResponse(text);
-    const result = JSON.parse(cleaned);
+
+    // Prüfe ob gültiges JSON extrahiert werden konnte
+    if (!cleaned || !cleaned.startsWith('{')) {
+      console.error('[manage2sail] Kein JSON in Gemini-Antwort gefunden:', text.substring(0, 100));
+      throw new Error('Gemini hat kein JSON zurückgegeben');
+    }
+
+    let result;
+    try {
+      result = JSON.parse(cleaned);
+    } catch (parseErr) {
+      console.error('[manage2sail] JSON Parse Error:', parseErr.message, 'Cleaned:', cleaned.substring(0, 100));
+      throw new Error('Ungültiges JSON von Gemini');
+    }
 
     return {
       regattaName: result.regattaName || null,
@@ -799,5 +1251,6 @@ export default {
   findSailorResult,
   formatForDatabase,
   searchManage2SailRegattas,
-  extractRegattaDetails
+  extractRegattaDetails,
+  extractEventDetails
 };
