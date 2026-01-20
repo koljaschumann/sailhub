@@ -108,11 +108,28 @@ export async function extractTextFromPDF(pdfData) {
 
 /**
  * Parst ein Regatta-Ergebnis-PDF
+ * Akzeptiert entweder base64-Daten ODER bereits extrahierten Text
  */
-export function parseRegattaPDF(text, sailNumber, boatData = {}) {
+export async function parseRegattaPDF(input, sailNumber, boatData = {}) {
   console.log('=== PARSING START ===');
   console.log('Segelnummer:', sailNumber);
-  console.log('Text-Länge:', text?.length);
+  console.log('Input-Länge:', input?.length);
+
+  // Prüfe ob Input base64 oder Text ist
+  // base64 enthält keine Zeilenumbrüche und besteht aus base64-Zeichen
+  let text = input;
+  const looksLikeBase64 = input && input.length > 100 && !input.includes('\n') && /^[A-Za-z0-9+/=]+$/.test(input.slice(0, 100));
+
+  if (looksLikeBase64) {
+    console.log('Input scheint base64 zu sein, extrahiere Text...');
+    text = await extractTextFromPDF(input);
+    if (!text) {
+      console.log('Text-Extraktion fehlgeschlagen, versuche OCR...');
+      text = await performOCR(input);
+    }
+  }
+
+  console.log('Text-Länge nach Extraktion:', text?.length);
 
   const result = {
     success: false,
@@ -435,6 +452,11 @@ export function parseRegattaPDF(text, sailNumber, boatData = {}) {
   } catch (err) {
     console.error('Parse error:', err);
     result.feedback = 'Fehler beim Parsen: ' + err.message;
+  }
+
+  // Füge placement als Alias für participant.rank hinzu (für Kompatibilität)
+  if (result.participant?.rank) {
+    result.placement = result.participant.rank;
   }
 
   return result;

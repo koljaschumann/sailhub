@@ -803,8 +803,12 @@ function parseResultsAndFindSailor(html, sailNumber) {
 }
 
 /**
- * Sucht nach Segelnummer direkt im HTML-Text (Fallback wenn Tabellen-Parsing fehlschlägt)
- * Findet auch Segelnummern in unstrukturierten Formaten
+ * Sucht nach Segelnummer im HTML und extrahiert Platzierung
+ *
+ * Robuster Ansatz:
+ * 1. Suche die Segelnummer im HTML (verschiedene Formate)
+ * 2. Analysiere den Kontext vor/nach der Segelnummer
+ * 3. Die Platzierung steht typischerweise VOR der Segelnummer in der gleichen Zeile
  */
 function searchSailNumberInText(html, sailNumber) {
   const normalizedSearch = normalizeSailNumber(sailNumber);
@@ -812,46 +816,131 @@ function searchSailNumberInText(html, sailNumber) {
 
   if (!numberOnly || numberOnly.length < 3) return null;
 
-  // Suche nach allen Vorkommen von GER + Nummer in der Nähe
-  const patterns = [
-    new RegExp(`GER\\s*${numberOnly}\\b`, 'gi'),
-    new RegExp(`\\b${numberOnly}\\b`, 'g')
+  console.log('[manage2sail] Suche Segelnummer:', sailNumber, '→', numberOnly);
+
+  // Verschiedene Varianten der Segelnummer suchen
+  // GER 13162, GER13162, GER&nbsp;13162, etc.
+  const sailNumPatterns = [
+    `GER\\s*${numberOnly}`,           // GER 13162 oder GER13162
+    `GER[\\s\\u00A0]+${numberOnly}`,  // GER&nbsp;13162
+    `>\\s*${numberOnly}\\s*<`,        // >13162< (nur Nummer in einer Zelle)
   ];
 
-  for (const pattern of patterns) {
-    if (pattern.test(html)) {
-      // Gefunden! Versuche Kontext zu extrahieren
-      const match = html.match(new RegExp(`.{0,200}GER\\s*${numberOnly}.{0,200}`, 'i'));
-      if (match) {
-        const context = match[0];
+  let foundContext = null;
+  let matchedPattern = null;
 
-        // Versuche Platzierung aus Kontext zu extrahieren
-        // Typische Muster: "2." oder ">2<" oder "Platz 2"
-        const placementMatch = context.match(/(?:^|\D)(\d{1,3})(?:\.|<|\s|$)/);
-        const placement = placementMatch ? parseInt(placementMatch[1]) : null;
+  for (const pattern of sailNumPatterns) {
+    // Suche mit Kontext: 300 Zeichen vor und 200 nach der Segelnummer
+    const contextRegex = new RegExp(`.{0,300}${pattern}.{0,200}`, 'gi');
+    const match = contextRegex.exec(html);
+    if (match) {
+      foundContext = match[0];
+      matchedPattern = pattern;
+      console.log('[manage2sail] Gefunden mit Pattern:', pattern);
+      break;
+    }
+  }
 
-        // Versuche Namen zu extrahieren (typisch: Vorname NACHNAME oder NACHNAME, Vorname)
-        const nameMatch = context.match(/([A-ZÄÖÜ][a-zäöüß]+)\s+([A-ZÄÖÜ]{2,})|([A-ZÄÖÜ]{2,})[,\s]+([A-ZÄÖÜ][a-zäöüß]+)/);
-        let name = null;
-        if (nameMatch) {
-          if (nameMatch[1] && nameMatch[2]) {
-            name = `${nameMatch[1]} ${nameMatch[2]}`;
-          } else if (nameMatch[3] && nameMatch[4]) {
-            name = `${nameMatch[4]} ${nameMatch[3]}`;
-          }
-        }
+  if (!foundContext) {
+    console.log('[manage2sail] Segelnummer nicht gefunden');
+    return null;
+  }
 
-        return {
-          found: true,
-          sailNumber: `GER ${numberOnly}`,
-          placement: placement && placement > 0 && placement < 500 ? placement : null,
-          name: name
-        };
+  console.log('[manage2sail] Kontext gefunden:', foundContext.substring(0, 150).replace(/\s+/g, ' ') + '...');
+
+  // Extrahiere alle HTML-Tags für Struktur-Analyse
+  // Suche nach dem Pattern: >PLATZIERUNG<...>SEGELNUMMER<...>NAME<
+
+  let placement = null;
+  let name = null;
+
+  // Methode 1: Suche nach >ZAHL< Pattern VOR der Segelnummer
+  // Die Platzierung ist die letzte alleinstehende Zahl vor der Segelnummer
+  const beforeSailNum = foundContext.split(new RegExp(`GER[\\s\\u00A0]*${numberOnly}`, 'i'))[0] || '';
+
+  // Alle Zahlen in Tabellenzellen vor der Segelnummer finden
+  const cellNumbers = [...beforeSailNum.matchAll(/>[\s]*(\d{1,3})[\s\.]*</g)];
+  if (cellNumbers.length > 0) {
+    // Die letzte Zahl vor der Segelnummer ist typischerweise die Platzierung
+    const lastNum = parseInt(cellNumbers[cellNumbers.length - 1][1]);
+    if (lastNum > 0 && lastNum < 500) {
+      placement = lastNum;
+      console.log('[manage2sail] Platzierung aus Zelle gefunden:', placement);
+    }
+  }
+
+  // Methode 2: Suche nach "Nr." oder Rang-Spalte
+  if (!placement) {
+    const rankMatch = beforeSailNum.match(/(?:Nr\.?|Rang|Pos\.?|#)[\s:]*(\d{1,3})/i);
+    if (rankMatch) {
+      placement = parseInt(rankMatch[1]);
+      console.log('[manage2sail] Platzierung aus Label gefunden:', placement);
+    }
+  }
+
+  // Methode 3: Erste Zahl in der Zeile (oft die Platzierung)
+  if (!placement) {
+    // Suche nach dem letzten <tr> vor der Segelnummer und extrahiere die erste Zahl
+    const trStart = beforeSailNum.lastIndexOf('<tr');
+    if (trStart !== -1) {
+      const rowContent = beforeSailNum.substring(trStart);
+      const firstNumMatch = rowContent.match(/<td[^>]*>[\s]*(\d{1,3})[\s\.]*<\/td>/i);
+      if (firstNumMatch) {
+        placement = parseInt(firstNumMatch[1]);
+        console.log('[manage2sail] Platzierung aus erster Zelle gefunden:', placement);
       }
     }
   }
 
-  return null;
+  // Name extrahieren: Nach der Segelnummer suchen
+  const afterSailNum = foundContext.split(new RegExp(`GER[\\s\\u00A0]*${numberOnly}`, 'i'))[1] || '';
+
+  // Suche nach Namen-Pattern in Tabellenzellen
+  // Typisch: <td>SCHUMANN</td> oder <td>Moritz SCHUMANN</td>
+  const nameMatch = afterSailNum.match(/>[\s]*([A-ZÄÖÜ][a-zäöüß]*[\s]+[A-ZÄÖÜ]{2,}|[A-ZÄÖÜ]{2,}[\s,]+[A-ZÄÖÜ][a-zäöüß]*)[\s]*</);
+  if (nameMatch) {
+    name = decodeHTMLEntities(nameMatch[1].trim());
+    console.log('[manage2sail] Name gefunden:', name);
+  } else {
+    // Versuche einzelnen Nachnamen zu finden
+    const surnameMatch = afterSailNum.match(/>[\s]*([A-ZÄÖÜ]{2,}[a-zäöüß]*)[\s]*</);
+    if (surnameMatch && surnameMatch[1].length > 2) {
+      name = decodeHTMLEntities(surnameMatch[1]);
+    }
+  }
+
+  // Teilnehmerzahl: Zähle alle Zeilen mit Platzierungen in der gleichen Tabelle
+  let totalParticipants = null;
+
+  // Finde die Tabelle, die die Segelnummer enthält
+  const tableStartIdx = html.lastIndexOf('<table', html.indexOf(numberOnly));
+  const tableEndIdx = html.indexOf('</table>', html.indexOf(numberOnly));
+
+  if (tableStartIdx !== -1 && tableEndIdx !== -1) {
+    const tableContent = html.substring(tableStartIdx, tableEndIdx);
+    // Zähle alle Zeilen mit einer Platzierung (Zahl in erster Spalte)
+    const dataRows = tableContent.match(/<tr[^>]*>[\s\S]*?<td[^>]*>[\s]*\d{1,3}[\s\.]*<\/td>/gi);
+    if (dataRows) {
+      totalParticipants = dataRows.length;
+      console.log('[manage2sail] Teilnehmer gezählt:', totalParticipants);
+    }
+  }
+
+  // Ergebnis validieren
+  if (placement && (placement < 1 || placement > 500)) {
+    console.log('[manage2sail] Ungültige Platzierung ignoriert:', placement);
+    placement = null;
+  }
+
+  console.log('[manage2sail] Finales Ergebnis - Platz:', placement, ', Name:', name, ', Teilnehmer:', totalParticipants);
+
+  return {
+    found: true,
+    sailNumber: `GER ${numberOnly}`,
+    placement: placement,
+    name: name,
+    totalParticipants: totalParticipants
+  };
 }
 
 /**
@@ -889,6 +978,10 @@ export async function extractEventDetails(url, sailNumber) {
     if (textSearchResult?.found) {
       console.log('[manage2sail] Segelnummer per Textsuche gefunden:', textSearchResult);
       sailorResult = textSearchResult;
+      // Nutze Teilnehmerzahl aus der Textsuche wenn verfügbar
+      if (textSearchResult.totalParticipants) {
+        totalParticipants = textSearchResult.totalParticipants;
+      }
     }
 
     // 3. Versuche eingebettete Klassendaten zu extrahieren

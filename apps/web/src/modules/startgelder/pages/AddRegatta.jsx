@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useTheme, GlassCard, Button, Icons, useToast } from '@tsc/ui';
 import { useData, BOAT_CLASSES } from '../context/DataContext';
-import { searchManage2SailRegattas, extractRegattaDetails } from '@tsc/supabase';
+import { searchManage2SailRegattas, extractRegattaDetails, extractEventDetails } from '@tsc/supabase';
 import { extractTextFromPDF, parseRegattaPDF, parseInvoicePDF, performOCR } from '../utils/pdfParser';
 import { fuzzySearchRegattas, deduplicateResults } from '../utils/fuzzySearch';
 
@@ -122,15 +122,64 @@ export function AddRegattaPage({ setCurrentPage }) {
     setShowDropdown(false);
     setSearchQuery(regatta.name || regatta.regattaName);
 
-    // Wenn URL vorhanden → Details via Gemini extrahieren
-    if (regatta.url && regatta.source === 'gemini') {
+    // Wenn URL vorhanden → Details extrahieren (für alle Online-Quellen)
+    if (regatta.url && regatta.source !== 'local') {
       setIsExtracting(true);
       setSailorFound(null);
 
-      try {
-        const details = await extractRegattaDetails(regatta.url, boatData.segelnummer);
+      let details = null;
 
-        // Auto-Fill
+      // 1. Zuerst Firecrawl-basierte Extraktion mit automatischer Klassenfindung
+      try {
+        console.log('Versuche extractEventDetails (Firecrawl)...');
+        details = await extractEventDetails(regatta.url, boatData.segelnummer);
+        console.log('extractEventDetails Ergebnis:', details);
+      } catch (err) {
+        console.warn('extractEventDetails fehlgeschlagen, versuche Fallback:', err.message);
+      }
+
+      // 2. Fallback: Gemini wenn Firecrawl keine vollständigen Daten liefert
+      // (kein Ergebnis ODER Segelnummer nicht gefunden UND keine Teilnehmerzahl)
+      const needsGeminiFallback = !details ||
+        (!details.sailorResult?.found && !details.totalParticipants);
+
+      if (needsGeminiFallback) {
+        try {
+          console.log('Versuche extractRegattaDetails (Gemini)...');
+          const geminiDetails = await extractRegattaDetails(regatta.url, boatData.segelnummer);
+          console.log('extractRegattaDetails Ergebnis:', geminiDetails);
+
+          // WICHTIG: Firecrawl-Daten (Name, Datum) BEVORZUGEN!
+          // Gemini-Daten nur für fehlende Werte (Teilnehmer, Wettfahrten, Platzierung)
+          if (geminiDetails) {
+            details = {
+              // Name und Datum: Firecrawl > Suchergebnis > Gemini
+              regattaName: details?.regattaName || regatta.name || geminiDetails.regattaName,
+              date: details?.date || geminiDetails.date,
+              // Teilnehmer und Wettfahrten: Gemini ergänzt fehlende Daten
+              totalParticipants: details?.totalParticipants || geminiDetails.totalParticipants,
+              raceCount: details?.raceCount || geminiDetails.raceCount,
+              // Segler-Ergebnis: Gemini nur wenn gefunden
+              sailorResult: geminiDetails.sailorResult?.found
+                ? geminiDetails.sailorResult
+                : (details?.sailorResult || { found: false })
+            };
+          }
+        } catch (err) {
+          console.error('Gemini-Extraktion fehlgeschlagen:', err);
+          // Wenn Firecrawl zumindest Basisdaten hat, verwende diese
+          if (!details) {
+            addToast('Fehler beim Laden der Details. Bitte manuell ausfüllen.', 'error');
+            setRegattaName(regatta.name || '');
+            if (regatta.date) setDate(regatta.date);
+            setIsExtracting(false);
+            return;
+          }
+        }
+      }
+
+      // Auto-Fill mit extrahierten Details
+      if (details) {
         if (details.regattaName) setRegattaName(details.regattaName);
         if (details.date) setDate(details.date);
         if (details.totalParticipants) setTotalParticipants(details.totalParticipants.toString());
@@ -145,15 +194,9 @@ export function AddRegattaPage({ setCurrentPage }) {
           setSailorFound({ found: false });
           addToast('Regatta geladen. Bitte Platzierung manuell eingeben.', 'warning');
         }
-      } catch (err) {
-        console.error('Extraction error:', err);
-        addToast('Fehler beim Laden der Details. Bitte manuell ausfüllen.', 'error');
-        // Fallback: Basisdaten aus Suchergebnis
-        setRegattaName(regatta.name || '');
-        if (regatta.date) setDate(regatta.date);
-      } finally {
-        setIsExtracting(false);
       }
+
+      setIsExtracting(false);
     } else {
       // Lokale Regatta → Daten direkt übernehmen
       setRegattaName(regatta.name || regatta.regattaName || '');
@@ -552,10 +595,33 @@ export function AddRegattaPage({ setCurrentPage }) {
                   </div>
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
-                  <span className={`w-5 h-5 ${isDark ? 'text-gold-400' : 'text-amber-500'}`}>{Icons.warning}</span>
-                  <p className={isDark ? 'text-cream' : 'text-light-text'}>
-                    Segelnummer nicht gefunden. Bitte Platzierung manuell eingeben.
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-5 h-5 ${isDark ? 'text-gold-400' : 'text-amber-500'}`}>{Icons.warning}</span>
+                    <p className={isDark ? 'text-cream' : 'text-light-text'}>
+                      Segelnummer nicht gefunden. Lade das Ergebnis-PDF von manage2sail:
+                    </p>
+                  </div>
+                  {selectedRegatta?.url && (
+                    <a
+                      href={selectedRegatta.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                        isDark
+                          ? 'bg-gold-400/20 text-gold-400 hover:bg-gold-400/30'
+                          : 'bg-teal-500/20 text-teal-600 hover:bg-teal-500/30'
+                      }`}
+                    >
+                      {Icons.receipt}
+                      Regatta auf manage2sail öffnen
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
+                  )}
+                  <p className={`text-xs ${isDark ? 'text-cream/50' : 'text-light-muted'}`}>
+                    Dort auf "Ergebnisse" klicken und PDF herunterladen. Dann hier hochladen.
                   </p>
                 </div>
               )}

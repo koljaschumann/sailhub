@@ -194,28 +194,39 @@ Erfasse Regatta-Teilnahmen automatisch über manage2sail und erstelle Erstattung
 
 | Feature | Beschreibung |
 |---------|-------------|
-| **Modus-Auswahl** | Wahl zwischen manage2sail Suche oder PDF Upload / Manuell |
 | **manage2sail Auto-Suche** | Intelligente Suche mit Fuzzy-Matching |
-| **PDF Upload / Manuell** | Sicherer Fallback wenn manage2sail nicht funktioniert |
+| **Ergebnis-PDF Upload** | Automatische Extraktion von Platzierung, Teilnehmern, Wettfahrten |
+| **OCR für Bild-PDFs** | Automatische Texterkennung bei gescannten PDFs |
+| **Fortschrittsanzeige** | Visueller Fortschrittsbalken + Status bei PDF-Verarbeitung |
 | Rechnungs-Upload | PDF/Bild Upload für Belege (verpflichtend) |
 | SEPA-Export | Sammelüberweisung generieren |
 | Auto-Berechnung | Erstattungsbetrag automatisch |
 
 **Seiten:** Dashboard, AddRegatta, Export, Settings
 
-**Technische Details (manage2sail Auto-Suche):**
+**Vereinfachter Flow (seit 18.01.2026):**
+```
+Suche auf manage2sail → Ergebnis-PDF Upload → (Crew) → Rechnung
+```
+- Keine Modus-Auswahl mehr, direkter Flow
+- manage2sail liefert Name, Datum, URL
+- PDF-Upload ergänzt Platzierung, Teilnehmer, Wettfahrten
+- PDF überschreibt KEINE bereits gesetzten Werte (Suche hat Priorität)
+
+**Technische Details:**
 - Scraping via Firecrawl (scrape.aitema.de) mit Fallback auf CORS-Proxies
 - URL-Parameter: `filterText` (nicht `q`!)
 - Lokale Fuzzy-Suche + Ranking nach Ähnlichkeit
 - Debounced Search: 500ms Verzögerung nach Eingabe
 - Jahr-Filter: Aktuelles Jahr + 2 Vorjahre
-- Auto-Fill: Name, Datum, Ort, Platzierung bei Auswahl
+- PDF-Verarbeitung: PDF.js für Text, Tesseract.js für OCR, Gemini für Analyse
 - Relevante Dateien:
   - `apps/web/src/modules/startgelder/pages/AddRegatta.jsx`
+  - `apps/web/src/modules/startgelder/utils/pdfParser.js`
   - `apps/web/src/modules/startgelder/utils/fuzzySearch.js`
   - `packages/supabase/src/manage2sail.js`
 
-**Status:** ✅ Vollständig funktionsfähig (16.01.2026)
+**Status:** ✅ Vollständig funktionsfähig (18.01.2026)
 
 ---
 
@@ -551,14 +562,14 @@ ssh root@49.13.15.44
 
 ---
 
-## Current State (Stand: 16. Januar 2026)
+## Current State (Stand: 18. Januar 2026)
 
 **Alle 8 Module sind vollständig funktionsfähig und getestet.**
 
 | Modul | Status | Letzte Änderung |
 |-------|--------|-----------------|
 | Saisonplanung | ✅ Funktioniert | - |
-| **Startgeld-Erstattung** | ✅ Funktioniert | 16.01.2026: manage2sail Suche vollständig funktionsfähig |
+| **Startgeld-Erstattung** | ✅ Funktioniert | 18.01.2026: Vereinfachter Flow, PDF-Fortschrittsanzeige |
 | Schadensmeldung | ✅ Funktioniert | - |
 | Eventanmeldung | ✅ Funktioniert | - |
 | Saison-Charter | ✅ Funktioniert | 15.01.2026: DB-Schema korrigiert |
@@ -568,10 +579,15 @@ ssh root@49.13.15.44
 
 ### Kürzlich behobene Probleme
 
-1. **Saison-Charter Buchungen**: Spaltennamen im Code an DB-Schema angepasst
-2. **Saison-Charter Rechnungen**: Client-seitige Rechnungsnummerngenerierung implementiert
-3. **Jugendleistungsfonds Anträge**: Fehlende Spalten hinzugefügt, RLS-Policies korrigiert
-4. **manage2sail Suche**: URL-Parameter korrigiert (`filterText` statt `q`) + HTML-Entity Dekodierung (16.01.2026)
+1. **Startgeld-Erstattung PDF-Verarbeitung** (18.01.2026):
+   - Vereinfachter Flow ohne Modus-Auswahl (direkt Suche → PDF → Rechnung)
+   - PDF überschreibt keine bereits gesetzten Werte mehr (Suche hat Priorität)
+   - OCR-Triggering bei weniger als 500 Zeichen bereinigtem Text
+   - Fortschrittsanzeige mit Status-Text und Prozent-Balken
+2. **Saison-Charter Buchungen**: Spaltennamen im Code an DB-Schema angepasst
+3. **Saison-Charter Rechnungen**: Client-seitige Rechnungsnummerngenerierung implementiert
+4. **Jugendleistungsfonds Anträge**: Fehlende Spalten hinzugefügt, RLS-Policies korrigiert
+5. **manage2sail Suche**: URL-Parameter korrigiert (`filterText` statt `q`) + HTML-Entity Dekodierung (16.01.2026)
 
 ---
 
@@ -712,6 +728,53 @@ Browser blockiert direkte Requests zu manage2sail.com. Daher nutzen wir:
 1. Firecrawl (selbst-gehostet auf scrape.aitema.de) als Proxy
 2. Öffentliche CORS-Proxies als Fallback
 
+### PDF-Verarbeitung (Ergebnis-PDFs)
+
+> **Datei:** `apps/web/src/modules/startgelder/utils/pdfParser.js`
+
+**Verarbeitungskette:**
+```
+PDF-Upload
+    ↓
+PDF.js Text-Extraktion
+    ↓
+Prüfung: Bereinigter Text < 500 Zeichen?
+    ↓ JA                    ↓ NEIN
+Tesseract.js OCR        Direkt zu Gemini
+    ↓                       ↓
+Gemini AI Analyse (mit Regex-Fallback)
+    ↓
+Ergebnis: Platzierung, Teilnehmer, Wettfahrten
+```
+
+**Wichtige Regeln:**
+
+| Regel | Beschreibung |
+|-------|-------------|
+| **OCR-Threshold** | 500 Zeichen bereinigter Text (ohne Seitenmarker, ohne Whitespace) |
+| **Seitenmarker** | `--- Seite X Ende ---` werden vor der Prüfung entfernt |
+| **Priorität** | Suche > PDF (PDF überschreibt keine bereits gesetzten Werte) |
+| **Fortschritts-Callback** | `onProgress({ status, percent, current, total })` |
+
+**OCR-Triggering (WICHTIG!):**
+```javascript
+// Seitenmarker UND Whitespace entfernen für echte Textlänge
+const cleanText = text
+  ? text.replace(/---\s*Seite\s*\d+\s*Ende\s*---/g, '').replace(/[\n\r\s]+/g, ' ').trim()
+  : '';
+
+// OCR wenn weniger als 500 Zeichen echter Text
+if (cleanText.length < 500) {
+  text = await performOCR(input, onProgress);
+}
+```
+
+**Fortschritts-Status:**
+- `PDF wird analysiert...` (5%)
+- `Texterkennung läuft...` (10%)
+- `Texterkennung: Seite X von Y` (10-80%)
+- `KI analysiert Ergebnisse...` (90%)
+
 ---
 
 ## Kontakt & Support
@@ -722,5 +785,5 @@ Browser blockiert direkte Requests zu manage2sail.com. Daher nutzen wir:
 
 ---
 
-*Zuletzt aktualisiert: 16. Januar 2026, 10:30 Uhr*
+*Zuletzt aktualisiert: 18. Januar 2026, 23:30 Uhr*
 *SSL-Zertifikat gültig bis: 8. April 2026*

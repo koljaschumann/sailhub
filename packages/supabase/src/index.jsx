@@ -5,6 +5,7 @@ export {
   parseRegattaResults,
   findSailorResult,
   searchManage2SailRegattas,
-  extractRegattaDetails
+  extractRegattaDetails,
+  extractEventDetails
 } from './manage2sail.js';
 export { submitTicket, submitDeletionNotice } from './tickets.js';
