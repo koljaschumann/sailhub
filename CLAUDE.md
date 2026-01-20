@@ -785,6 +785,7 @@ if (cleanText.length < 500) {
 
 ---
 
-*Zuletzt aktualisiert: 20. Januar 2026, 12:00 Uhr*
+*Zuletzt aktualisiert: 20. Januar 2026, 20:31 Uhr*
+*Letztes Deployment: 20. Januar 2026, 19:31 UTC*
 *SSL-Zertifikat gültig bis: 8. April 2026*
-*Letzter Commit: b804141 (feat: Vereinfachter Flow + PDF-Fortschrittsanzeige)*
+*Letzter Commit: ea5c20a (docs: Dokumentation aktualisiert)*
