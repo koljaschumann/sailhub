@@ -779,11 +779,12 @@ if (cleanText.length < 500) {
 
 ## Kontakt & Support
 
-- **Repository**: https://github.com/koljaschumann/tsc-jugend-plattform
+- **Repository**: https://github.com/koljaschumann/sailhub
 - **Tickets**: Feedback-Widget in der App
 - **ClickUp**: https://app.clickup.com (Workspace: Aitema)
 
 ---
 
-*Zuletzt aktualisiert: 18. Januar 2026, 23:30 Uhr*
+*Zuletzt aktualisiert: 20. Januar 2026, 12:00 Uhr*
 *SSL-Zertifikat gültig bis: 8. April 2026*
+*Letzter Commit: b804141 (feat: Vereinfachter Flow + PDF-Fortschrittsanzeige)*
